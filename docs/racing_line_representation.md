@@ -14,6 +14,12 @@ sample. Optional non-negative margin `m` changes the limits to
 offsets are errors; values are never clipped. This is a point reference model:
 motorcycle width and rider clearance are deliberately not modelled.
 
+When constructing a path from raw offsets, the default margin is zero. When an
+existing `LateralOffsetProfile` is supplied, its recorded margin is preserved
+unless an explicit margin override is requested. In both cases the offsets are
+revalidated against the widths of the sampled track passed to the path builder;
+a profile validated on one track cannot bypass another track's boundaries.
+
 ## Actual path geometry
 
 Centreline `s` labels where an offset is specified. Racing-line `q` is the
@@ -33,6 +39,13 @@ Chordal length and local three-point curvature are resolution-dependent.
 Chord length converges from below for a sampled circle; sharp offset changes or
 primitive joins can produce locally large curvature. Perform spacing convergence
 checks. No smoothing, hidden clipping, or optimisation is performed.
+
+In particular, the Phase 3 centreline path uses the sampled track's analytic
+primitive curvature and centreline `s`, whereas generated Phase 4 paths use
+chordal `q` and geometric periodic three-point curvature. Finite-resolution lap
+time differences are therefore expected, especially near primitive curvature
+jumps. Check that the difference converges under spacing refinement before
+interpreting a small lap-time difference.
 
 ```bash
 python -m motorcycle_lap_sim.racing_line.diagnostics \
