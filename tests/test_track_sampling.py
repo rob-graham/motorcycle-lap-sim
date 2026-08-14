@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from motorcycle_lap_sim.track.primitives import CircularArc, Pose, Straight
-from motorcycle_lap_sim.track.sampling import sample_track
+from motorcycle_lap_sim.track.sampling import sample_track, sample_track_stations
 from motorcycle_lap_sim.track.track import Track
 
 OVAL = Path(__file__).parents[1] / "examples/tracks/test_oval.yaml"
@@ -45,3 +45,20 @@ def test_sampling_resolution_does_not_change_analytic_length() -> None:
     coarse = sample_track(track, 10.0)
     fine = sample_track(track, 0.1)
     assert coarse.total_length_m == fine.total_length_m == pytest.approx(200 + 60 * math.pi)
+
+
+def test_explicit_station_sampling_matches_regular_analytic_sampling():
+    track = Track.from_yaml(OVAL)
+    regular = sample_track(track, 2.0)
+    explicit = sample_track_stations(track, regular.s_m)
+    for name in ("s_m", "x_m", "y_m", "heading_rad", "tangent_x", "tangent_y",
+                 "normal_x", "normal_y", "curvature_1pm", "width_left_m", "width_right_m"):
+        assert np.allclose(getattr(explicit, name), getattr(regular, name))
+
+
+def test_explicit_closed_station_rejects_duplicate_endpoint_by_default():
+    track = Track.from_yaml(OVAL)
+    with pytest.raises(ValueError, match=r"\[0, total_length\)"):
+        sample_track_stations(track, [track.total_length_m])
+    endpoint = sample_track_stations(track, [track.total_length_m], include_endpoint=True)
+    assert endpoint.s_m[0] == track.total_length_m

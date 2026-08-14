@@ -55,3 +55,7 @@ python -m motorcycle_lap_sim.racing_line.diagnostics \
 
 The generic output `SampledPath` passes directly to the fixed-path solver,
 which has no dependency on `Track`.
+
+## Alternative smooth planar representation (Phase 7)
+
+The original `C(s)+n(s)N(s)` sampled representation and periodic three-point curvature remain available. Phase 7 separately interpolates exact offset guide points with a C2-periodic Cartesian cubic and uses analytic derivatives for curvature plus quadrature for actual arc length. Guide density and output sampling resolution are deliberately independent. This alternative is experimental and is not the optimiser default. See `smooth_planar_racing_line.md`.

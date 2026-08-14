@@ -57,3 +57,7 @@ python -m motorcycle_lap_sim.optimisation.diagnostics \
 ## Phase 6 interoperability
 
 Phase 6 leaves the Phase 5 periodic-cubic parameterisation and deterministic bounded pattern search unchanged. If the motorcycle enables the path-curvature transient proxy, each objective evaluation receives its effect through the fixed-path solver. Optimised controls should be re-evaluated (not re-optimised) at finer path spacings because curvature gradients are resolution-dependent. Optimisation CSV output includes gradient, actual rate, and transient ceiling.
+
+## Phase 7 status
+
+Phase 5 pattern search and its 12-DOF periodic offset parameterisation are unchanged and still build the established offset-sampled geometry by default. Diagnostics can map the same controls to uniformly spaced planar guide offsets for comparison, but Phase 7 neither optimises independent planar guide points nor switches the objective geometry.

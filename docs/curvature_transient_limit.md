@@ -52,3 +52,7 @@ large unexplained changes in predicted lap time. Handling-model effects must
 always be reported relative to the disabled/ideal-response baseline. Large
 differences are sensitivity requiring investigation, not automatically a more
 accurate result.
+
+## Smooth planar geometry experiment
+
+Phase 7 can feed analytic Cartesian-spline curvature through the unchanged generic `SampledPath` interface. Its diagnostic evaluates one fixed continuous curve at 1.0, 0.5, and 0.25 m both with handling disabled and with the experimental 0.8 limit. This isolates output-resolution behaviour from guide construction; it neither validates 0.8 physically nor changes the Phase 5 default geometry.
