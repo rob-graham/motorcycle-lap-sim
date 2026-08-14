@@ -86,3 +86,7 @@ optimisation dependency.
 ## Phase 6 optional path-handling proxy
 
 Motorcycle YAML may contain `handling.max_path_curvature_rate_1pmps`, a finite, strictly positive limit in 1/(m*s). Omitting `handling` disables it without a default. The fixed-path capability layer calculates the periodic curvature gradient and combines its speed ceiling with existing local ceilings. Racing-line optimisation remains formula-agnostic and sees only the resulting lap time. See [the curvature transient specification](curvature_transient_limit.md).
+
+## Phase 7 geometry boundary
+
+The track remains a piecewise straight/circular analytic definition and may have curvature jumps. Experimental Phase 7 converts supplied offset guides into a C2-periodic Cartesian spline, then adapts it to the same generic `SampledPath` consumed by the track-unaware fixed-path solver. Existing Phase 5 geometry remains the optimiser default pending validation.

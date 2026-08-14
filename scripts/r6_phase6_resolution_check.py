@@ -6,14 +6,14 @@ import numpy as np
 
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
 from motorcycle_lap_sim.optimisation import PeriodicCubicParameterisation, evaluate_racing_line
+from motorcycle_lap_sim.optimisation.reference import PHASE5_DETERMINISTIC_LOCAL_REFERENCE
 from motorcycle_lap_sim.track import Track, sample_track
 
 
 def main() -> None:
     track = Track.from_yaml("examples/tracks/test_oval.yaml")
     bike = load_motorcycle_config("examples/motorcycles/r6_2017plus_reference.yaml")
-    controls = np.array([0.6875, -4, -4, 0.6875, 4, 4,
-                         0.625, -4, -4, 0.5625, 4, 4])
+    controls = PHASE5_DETERMINISTIC_LOCAL_REFERENCE
     parameterisation = PeriodicCubicParameterisation(12)
     print("mode,spacing_m,lap_time_s,max_curvature_1pm,max_gradient_1pm2,max_rate_1pmps")
     for label, candidate in (("disabled", bike),

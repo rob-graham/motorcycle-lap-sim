@@ -38,6 +38,23 @@ def sample_track(track: Track, spacing_m: float, *, include_endpoint: bool | Non
     if not include_endpoint:
         s = s[:-1]
 
+    return sample_track_stations(track, s, include_endpoint=include_endpoint)
+
+
+def sample_track_stations(track: Track, s_m, *, include_endpoint: bool = False) -> SampledTrack:
+    """Evaluate analytic track primitives at explicit centreline stations.
+
+    Closed-track callers normally supply stations in ``[0, L)``.  The endpoint
+    is accepted only when ``include_endpoint=True``, preserving
+    :func:`sample_track`'s explicit duplicate-endpoint option.
+    """
+    s = np.asarray(s_m, dtype=float)
+    if s.ndim != 1 or len(s) == 0 or not np.all(np.isfinite(s)):
+        raise ValueError("track stations must be a non-empty finite one-dimensional array")
+    upper_ok = s <= track.total_length_m if include_endpoint else s < track.total_length_m
+    if np.any(s < 0.0) or np.any(~upper_ok):
+        interval = "[0, total_length]" if include_endpoint else "[0, total_length)"
+        raise ValueError(f"track stations must lie in {interval}")
     starts_s = track.primitive_start_s_m
     start_poses = [track.start_pose]
     for primitive in track.primitives[:-1]:

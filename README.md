@@ -130,3 +130,7 @@ python -m motorcycle_lap_sim.optimisation.diagnostics \
 ## Phase 6: path-curvature transient proxy
 
 Phase 6 adds an optional, deterministic path-curvature transient speed ceiling to the fixed-path solver, while retaining the Phase 5 racing-line optimiser. It is a path-handling proxy—not a validated steering-dynamics model. See [`docs/curvature_transient_limit.md`](docs/curvature_transient_limit.md) for the formula, units, assumptions, diagnostics, and resolution guidance.
+
+## Phase 7 experimental planar racing line
+
+Track specifications remain piecewise analytic straights and circular arcs, including intentional curvature jumps. Phase 7 adds an alternative C2-periodic Cartesian motorcycle-path spline for side-by-side validation; it does not replace the Phase 5 offset-sampled optimiser default. See [the smooth planar racing-line design](docs/smooth_planar_racing_line.md) and run `python scripts/r6_phase7_planar_geometry_check.py` for reproducible comparisons.
