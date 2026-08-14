@@ -1,9 +1,8 @@
 # Motorcycle Lap Simulation
 
 A clean-sheet Python project for minimum-lap-time motorcycle simulation and
-racing-line optimisation. **Phase 2 adds independently validated motorcycle
-configuration and physical formulas, but still does not calculate a lap speed
-profile, lap time, or racing line.**
+racing-line optimisation. **Phase 3 adds a validated periodic fixed-path speed
+solver and lap time calculation; racing-line optimisation remains out of scope.**
 
 ## Architecture and status
 
@@ -37,6 +36,19 @@ python -m motorcycle_lap_sim.motorcycle.diagnostics \
 
 This runs independent motorcycle-model checks; it is not a lap speed
 simulation.
+
+## Fixed-path speed diagnostics
+
+From the repository root, run the Phase 3 solver on the example oval:
+
+```bash
+python -m motorcycle_lap_sim.speed_solver.diagnostics \
+    examples/tracks/test_oval.yaml \
+    examples/motorcycles/test_motorcycle.yaml
+```
+
+Use `--spacing METRES` to change the track sampling interval (the default is
+1 metre), and `--csv PATH` to write the solved distance and speed columns.
 
 ## Plot the example oval
 
