@@ -1,0 +1,19 @@
+# Counter-clockwise oval; angles are radians and widths are measured from centreline.
+start:
+  x_m: 0.0
+  y_m: 0.0
+  heading_rad: 0.0
+width_left_m: 4.0
+width_right_m: 4.0
+closed: true
+primitives:
+  - type: straight
+    length_m: 100.0
+  - type: circular_arc
+    radius_m: 30.0
+    turn_angle_rad: 3.141592653589793
+  - type: straight
+    length_m: 100.0
+  - type: circular_arc
+    radius_m: 30.0
+    turn_angle_rad: 3.141592653589793
