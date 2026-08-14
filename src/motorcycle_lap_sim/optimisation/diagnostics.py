@@ -2,11 +2,13 @@
 
 import argparse
 import csv
+from dataclasses import replace
+from math import isfinite
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from motorcycle_lap_sim.motorcycle.config import load_motorcycle_config
+from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
 from motorcycle_lap_sim.racing_line import build_racing_line_path
 from motorcycle_lap_sim.track import Track, sample_track
 from motorcycle_lap_sim.track.boundaries import calculate_boundaries
@@ -15,21 +17,37 @@ from .optimiser import OptimisationConfig, optimise_racing_line
 from .parameterisation import PeriodicCubicParameterisation
 
 
+def positive_finite(value: str) -> float:
+    """Parse a positive finite diagnostic override in SI units."""
+    try:
+        result = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number") from error
+    if not isfinite(result) or result <= 0:
+        raise argparse.ArgumentTypeError("must be positive and finite")
+    return result
+
+
 def write_csv(filename, samples, evaluation):
     with filename.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(("centreline_s_m", "offset_m", "x_m", "y_m", "racing_line_q_m",
-                         "curvature_1pm", "speed_mps", "gear", "engine_rpm"))
+                         "curvature_1pm", "speed_mps", "gear", "engine_rpm",
+                         "curvature_gradient_1pm2", "curvature_rate_1pmps",
+                         "speed_limit_curvature_transient_mps"))
         writer.writerows(zip(samples.s_m, evaluation.dense_offset_m,
             evaluation.sampled_path.x_m, evaluation.sampled_path.y_m,
             evaluation.sampled_path.q_m, evaluation.sampled_path.curvature_1pm,
             evaluation.speed_profile.speed_mps, evaluation.speed_profile.gear_number,
-            evaluation.speed_profile.engine_rpm))
+            evaluation.speed_profile.engine_rpm,
+            evaluation.speed_profile.curvature_gradient_1pm2,
+            evaluation.speed_profile.curvature_rate_1pmps,
+            evaluation.speed_profile.speed_limit_curvature_transient_mps))
 
 
 def plot_result(samples, baseline, optimised, filename):
     boundaries = calculate_boundaries(samples)
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, (ax, speed_ax) = plt.subplots(2, 1, figsize=(10, 9))
     ax.plot(boundaries.left_x_m, boundaries.left_y_m, "k--", label="left boundary")
     ax.plot(boundaries.right_x_m, boundaries.right_y_m, "k--", label="right boundary")
     ax.plot(samples.x_m, samples.y_m, color="0.6", label="centreline")
@@ -37,6 +55,12 @@ def plot_result(samples, baseline, optimised, filename):
     ax.plot(optimised.sampled_path.x_m, optimised.sampled_path.y_m,
             label="locally optimised racing line")
     ax.axis("equal"); ax.set_xlabel("x (m)"); ax.set_ylabel("y (m)"); ax.legend()
+    profile = optimised.speed_profile
+    speed_ax.plot(optimised.sampled_path.q_m, profile.speed_mps, label="solved speed")
+    speed_ax.plot(optimised.sampled_path.q_m, profile.speed_limit_curvature_transient_mps,
+                  "--", label="curvature-transient ceiling")
+    speed_ax.set_xlabel("path distance q (m)"); speed_ax.set_ylabel("speed (m/s)")
+    speed_ax.legend(); speed_ax.grid(True)
     fig.savefig(filename, dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
@@ -52,9 +76,13 @@ def main():
     parser.add_argument("--max-sweeps", type=int, default=30)
     parser.add_argument("--max-evaluations", type=int, default=500)
     parser.add_argument("--boundary-margin", type=float, default=0.25)
+    parser.add_argument("--curvature-rate-limit", type=positive_finite, metavar="VALUE",
+                        help="temporarily override/add the path-curvature-rate limit [1/(m*s)]")
     parser.add_argument("--output-csv", type=Path); parser.add_argument("--output-png", type=Path)
     args = parser.parse_args()
     track, bike = Track.from_yaml(args.track), load_motorcycle_config(args.motorcycle)
+    if args.curvature_rate_limit is not None:
+        bike = replace(bike, handling=HandlingConfig(args.curvature_rate_limit))
     samples = sample_track(track, args.spacing)
     config = OptimisationConfig(args.controls, args.control_bound, args.initial_step,
         args.minimum_step, 0.5, 1e-6, args.max_sweeps, args.max_evaluations,
@@ -71,6 +99,11 @@ def main():
     print(f"optimisation sample spacing: {args.spacing:.3f} m")
     print(f"validation sample spacing: {args.validation_spacing:.3f} m")
     print(f"control count: {args.controls}"); print(f"boundary margin: {args.boundary_margin:.3f} m")
+    if bike.handling is None:
+        print("curvature transient limit: disabled")
+    else:
+        print("curvature transient limit: "
+              f"{bike.handling.max_path_curvature_rate_1pmps:.6f} 1/(m*s)")
     print(f"initial lap time: {result.initial_lap_time_s:.9f} s")
     print(f"optimised lap time: {result.best_lap_time_s:.9f} s")
     print(f"improvement: {result.improvement_s:.9f} s ({result.improvement_percent:.6f}%)")
@@ -85,6 +118,8 @@ def main():
     print(f"zero-control validation lap time: {fine_zero.lap_time_s:.9f} s")
     print(f"optimised-control validation lap time: {fine_best.lap_time_s:.9f} s")
     print(f"validation improvement: {fine_zero.lap_time_s - fine_best.lap_time_s:.9f} s")
+    print(f"maximum |curvature rate|: {np.max(np.abs(fine_best.speed_profile.curvature_rate_1pmps)):.9f} 1/(m*s)")
+    print(f"maximum |curvature gradient|: {np.max(np.abs(fine_best.speed_profile.curvature_gradient_1pm2)):.9f} 1/m^2")
     if args.output_csv: write_csv(args.output_csv, fine, fine_best)
     if args.output_png: plot_result(fine, fine_zero, fine_best, args.output_png)
 

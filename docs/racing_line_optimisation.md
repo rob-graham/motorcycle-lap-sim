@@ -53,3 +53,7 @@ python -m motorcycle_lap_sim.optimisation.diagnostics \
   --boundary-margin 0.25 --output-csv optimised-line.csv \
   --output-png optimised-line.png
 ```
+
+## Phase 6 interoperability
+
+Phase 6 leaves the Phase 5 periodic-cubic parameterisation and deterministic bounded pattern search unchanged. If the motorcycle enables the path-curvature transient proxy, each objective evaluation receives its effect through the fixed-path solver. Optimised controls should be re-evaluated (not re-optimised) at finer path spacings because curvature gradients are resolution-dependent. Optimisation CSV output includes gradient, actual rate, and transient ceiling.

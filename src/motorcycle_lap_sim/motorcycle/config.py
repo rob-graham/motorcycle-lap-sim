@@ -81,6 +81,13 @@ class PowertrainConfig:
 
 
 @dataclass(frozen=True)
+class HandlingConfig:
+    """Optional path-handling proxy parameters (not steering dynamics)."""
+
+    max_path_curvature_rate_1pmps: float
+
+
+@dataclass(frozen=True)
 class MotorcycleConfig:
     environment: EnvironmentConfig
     motorcycle: MotorcycleGeometry
@@ -88,6 +95,7 @@ class MotorcycleConfig:
     rolling_resistance: RollingResistanceConfig
     tyres: TyreConfig
     powertrain: PowertrainConfig
+    handling: HandlingConfig | None = None
 
 
 def _section(data: Mapping[str, Any], name: str) -> Mapping[str, Any]:
@@ -102,6 +110,12 @@ def motorcycle_config_from_dict(data: Mapping[str, Any]) -> MotorcycleConfig:
     env, bike = _section(data, "environment"), _section(data, "motorcycle")
     aero, rolling = _section(data, "aerodynamics"), _section(data, "rolling_resistance")
     tyres, power = _section(data, "tyres"), _section(data, "powertrain")
+    handling_raw = data.get("handling")
+    if "handling" in data and not isinstance(handling_raw, Mapping):
+        raise ValueError("handling must be a mapping")
+    handling = (None if handling_raw is None else HandlingConfig(_positive(
+        handling_raw.get("max_path_curvature_rate_1pmps"),
+        "max_path_curvature_rate_1pmps")))
 
     environment = EnvironmentConfig(
         _positive(env.get("gravity_mps2"), "gravity_mps2"),
@@ -163,7 +177,7 @@ def motorcycle_config_from_dict(data: Mapping[str, Any]) -> MotorcycleConfig:
         environment, geometry,
         AerodynamicsConfig(_nonnegative(aero.get("cda_m2"), "cda_m2")),
         RollingResistanceConfig(_nonnegative(rolling.get("crr"), "crr")),
-        tyre_config, powertrain,
+        tyre_config, powertrain, handling,
     )
 
 

@@ -1,6 +1,7 @@
 """Deterministic first-order cyclic forward/backward propagation."""
 from dataclasses import dataclass
 import numpy as np
+from motorcycle_lap_sim.path import curvature_gradient_1pm2, curvature_transient_speed_limit_mps
 from .capabilities import best_gear, braking_capability, forward_acceleration_capability, lateral_speed_limit_mps, maximum_rev_limited_speed_mps
 from .results import SpeedProfileResult
 
@@ -17,7 +18,11 @@ def lap_time_seconds(path, speed):
 def solve_speed_profile(path,bike,config=SolverConfig()):
     n=len(path.q_m); dq=path.segment_lengths_m
     lateral=np.array([lateral_speed_limit_mps(k,bike) for k in path.curvature_1pm])
-    power=np.full(n,maximum_rev_limited_speed_mps(bike)); speed=np.minimum(lateral,power)
+    power=np.full(n,maximum_rev_limited_speed_mps(bike))
+    gradient=curvature_gradient_1pm2(path)
+    transient=(np.full(n,np.inf) if bike.handling is None else
+        curvature_transient_speed_limit_mps(path,bike.handling.max_path_curvature_rate_1pmps))
+    speed=np.minimum(np.minimum(lateral,power),transient)
     converged=False
     for iteration in range(1,config.max_iterations+1):
         old=speed.copy()
@@ -33,8 +38,11 @@ def solve_speed_profile(path,bike,config=SolverConfig()):
     ay=speed**2*np.abs(path.curvature_1pm); gears=[]; rpms=[]
     for v in speed:
         choice=best_gear(v,bike); gears.append(choice.gear_number); rpms.append(choice.engine_rpm)
-    arrays=[speed,lateral,power,ay,ax,np.asarray(gears,dtype=int),np.asarray(rpms)]
+    curvature_rate=speed*gradient
+    arrays=[speed,lateral,power,gradient,curvature_rate,transient,ay,ax,
+            np.asarray(gears,dtype=int),np.asarray(rpms)]
     for a in arrays:a.setflags(write=False)
-    return SpeedProfileResult(path.q_m,speed,lateral,power,ay,ax,arrays[5],arrays[6],lap_time_seconds(path,speed),iteration,True)
+    return SpeedProfileResult(path.q_m,speed,lateral,power,gradient,curvature_rate,transient,
+        ay,ax,arrays[8],arrays[9],lap_time_seconds(path,speed),iteration,True)
 
 def sqrt_nonnegative(value): return float(np.sqrt(max(0.,value)))
