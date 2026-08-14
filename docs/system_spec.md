@@ -14,12 +14,12 @@ The architecture deliberately separates four concepts:
    and boundaries describe the permitted physical region. Track geometry does
    not choose a path or contain vehicle physics.
 2. **Racing line — what path through that region does the motorcycle follow?**
-   A future `racing_line` package will represent a periodic path and validate
-   it against track boundaries. It will not solve vehicle speed.
+   The Phase 4 `racing_line` package represents a supplied periodic path and
+   validates it against track boundaries. It does not solve vehicle speed.
 3. **Fixed-path motorcycle simulation — for a supplied path, what is the
    fastest physically feasible periodic speed profile?** The Phase 2
-   `motorcycle` package now exposes independently validated configuration,
-   forces, and constraints; a future `speed_solver` will use them to
+   `motorcycle` package exposes independently validated configuration,
+   forces, and constraints; the `speed_solver` uses them to
    calculate speed, acceleration, lap time, and diagnostics for an
    immutable supplied path. This capability must be built and validated before
    optimisation.
@@ -51,10 +51,10 @@ loads, geometry-derived tip-over limits, lateral caps, and a generic friction
 ellipse. Each formula is usable without track geometry or plotting. It does not
 propagate speed or select gears.
 
-## Future modules (not implemented in Phase 2)
+## Module status
 
-- `racing_line`: path representation, interpolation, and boundary validation.
-- `speed_solver`: fastest feasible periodic speed on one fixed path and
+- `racing_line`: Phase 4 dense supplied-offset representation and boundary validation.
+- `speed_solver`: Phase 3 fastest feasible periodic speed on one fixed path and
   transparent constraint diagnostics.
 - `optimisation`: racing-line parameterisation and minimum-time optimisation.
 - output/reporting modules for speed, acceleration, line, and diagnostics.
@@ -66,3 +66,10 @@ testable and contain no duplicated hidden logic or mutable global state.
 ## Phase 3 status
 
 The solver calculates speed and lap time on a supplied fixed, closed path. Track-centreline sampling is an adapter only; racing-line optimisation remains outside the current system.
+
+## Phase 4 status
+
+The racing-line layer validates dense lateral offsets and constructs actual
+coordinates, chordal distance, and periodic geometric curvature as a generic
+`SampledPath`. The speed solver remains independent of track geometry. Phase 4
+contains no objective function, control-vector parameterisation, or optimiser.

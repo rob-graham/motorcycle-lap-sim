@@ -1,8 +1,8 @@
 # Motorcycle Lap Simulation
 
 A clean-sheet Python project for minimum-lap-time motorcycle simulation and
-racing-line optimisation. Phase 3 adds an independently validated fixed-path
-speed profile and lap time; it does not optimise a racing line.
+racing-line optimisation. Phase 4 adds a validated representation of a supplied
+racing line on top of the fixed-path solver; it does not optimise a line.
 
 ## Architecture and status
 
@@ -10,8 +10,8 @@ The numerical `track` package contains analytic centreline primitives, ordered
 tracks, closure diagnostics, arc-length sampling, and boundary calculation.
 The independent `motorcycle` package contains immutable validated configuration,
 engine and powertrain calculations, forces, load transfer, and physical limits.
-Plotting remains separate. Future phases will add distinct racing-line and
-optimisation packages; see
+Plotting remains separate. The distinct `racing_line` package constructs a
+generic `SampledPath`; a future phase will add optimisation; see
 [the system specification](docs/system_spec.md). Internal calculations use SI.
 
 ## Install and test
@@ -94,3 +94,19 @@ python -m motorcycle_lap_sim.speed_solver.diagnostics \
 The inline torque curve is a smooth stock-like rear-wheel estimate. The
 reported lap time consequently remains provisional and must not be interpreted
 as experimental validation.
+
+## Phase 4 supplied racing line
+
+Phase 4 accepts one lateral offset per sampled centreline station, validates it
+against track widths, and calculates displaced coordinates, chordal arc length,
+and periodic signed curvature. Positive offset is left of travel. See the
+[racing-line representation](docs/racing_line_representation.md).
+
+```bash
+python -m motorcycle_lap_sim.racing_line.diagnostics \
+    examples/tracks/test_oval.yaml --spacing 1.0 --constant-offset 2.0 \
+    --csv racing-line.csv --output-png racing-line.png
+```
+
+The `+2 m` example is deterministic manual geometry for inspection, not an
+optimal line.
