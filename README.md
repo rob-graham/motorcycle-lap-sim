@@ -17,17 +17,25 @@ All internal geometry uses metres, radians, and inverse metres.
 
 ```bash
 python -m pip install -e '.[test]'
-pytest
+python -m pytest
 ```
+
+The installed `pytest` console command is an optional shortcut. On Windows,
+the Python Scripts directory containing installed console commands may not be
+on `PATH`.
 
 ## Plot the example oval
 
 From the repository root:
 
 ```bash
-plot-example-track examples/tracks/test_oval.yaml --output test_oval.png
-# or: python -m motorcycle_lap_sim.plotting.track_plot examples/tracks/test_oval.yaml
+python -m motorcycle_lap_sim.plotting.track_plot \
+    examples/tracks/test_oval.yaml --output test_oval.png
 ```
+
+The installed console command
+`plot-example-track examples/tracks/test_oval.yaml --output test_oval.png` is an
+optional shortcut, with the same Windows `PATH` caveat described above.
 
 The YAML format records a start pose, distinct left/right widths, closure
 intent, and an ordered list of straight and circular-arc primitives.
