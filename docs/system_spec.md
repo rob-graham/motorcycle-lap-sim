@@ -24,7 +24,7 @@ The architecture deliberately separates four concepts:
    immutable supplied path. This capability must be built and validated before
    optimisation.
 4. **Racing-line optimisation — which permissible path minimises calculated
-   lap time?** A future `optimisation` package will vary the racing line, call
+   lap time?** The Phase 5 `optimisation` package varies the racing line, calls
    the fixed-path solver through its public interface, and enforce track/path
    constraints. It must not duplicate geometry or motorcycle feasibility logic.
 
@@ -73,3 +73,12 @@ The racing-line layer validates dense lateral offsets and constructs actual
 coordinates, chordal distance, and periodic geometric curvature as a generic
 `SampledPath`. The speed solver remains independent of track geometry. Phase 4
 contains no objective function, control-vector parameterisation, or optimiser.
+
+## Phase 5 status
+
+The optimisation layer provides a C2 periodic cubic control parameterisation,
+smooth asymmetric boundary-safe mapping, pure lap-time evaluation, and a
+deterministic bounded coordinate pattern search. It returns a locally and
+numerically optimised racing line and explicitly supports finer-resolution
+re-evaluation. It makes no global-optimality claim and introduces no new
+optimisation dependency.
