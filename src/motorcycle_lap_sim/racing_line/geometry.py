@@ -31,12 +31,19 @@ def periodic_three_point_curvature(x_m: ArrayLike, y_m: ArrayLike) -> NDArray[np
 
 
 def build_racing_line_path(sampled_track, offsets: LateralOffsetProfile | ArrayLike,
-                           *, boundary_margin_m: float = 0.0) -> SampledPath:
-    """Displace centreline samples along their left normals and build actual geometry."""
-    profile = offsets if isinstance(offsets, LateralOffsetProfile) else LateralOffsetProfile(
-        sampled_track, offsets, boundary_margin_m)
-    if len(profile.offset_m) != len(sampled_track.s_m):
-        raise ValueError("offset profile belongs to a differently sampled track")
+                           *, boundary_margin_m: float | None = None) -> SampledPath:
+    """Displace centreline samples along their left normals and build actual geometry.
+
+    Existing profiles retain their margin unless ``boundary_margin_m`` overrides
+    it.  Constructing a new profile here deliberately revalidates every input
+    against this call's sampled track; sample-count equality is not sufficient.
+    """
+    if isinstance(offsets, LateralOffsetProfile):
+        margin = offsets.boundary_margin_m if boundary_margin_m is None else boundary_margin_m
+        profile = LateralOffsetProfile(sampled_track, offsets.offset_m, margin)
+    else:
+        margin = 0.0 if boundary_margin_m is None else boundary_margin_m
+        profile = LateralOffsetProfile(sampled_track, offsets, margin)
     x = sampled_track.x_m + profile.offset_m * sampled_track.normal_x
     y = sampled_track.y_m + profile.offset_m * sampled_track.normal_y
     segment_lengths = np.hypot(np.roll(x, -1) - x, np.roll(y, -1) - y)

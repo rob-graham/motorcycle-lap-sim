@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from motorcycle_lap_sim.motorcycle.config import load_motorcycle_config
+from motorcycle_lap_sim.path import from_sampled_track
 from motorcycle_lap_sim.racing_line import LateralOffsetProfile, build_racing_line_path
 from motorcycle_lap_sim.speed_solver import solve_speed_profile
 from motorcycle_lap_sim.track import CircularArc, Pose, SampledTrack, Track, sample_track
@@ -52,6 +53,41 @@ def test_boundaries_and_margin_are_validated_without_clipping():
         LateralOffsetProfile(samples, np.zeros(count), 5.01)
 
 
+def test_existing_profile_is_revalidated_against_supplied_track_widths():
+    wide = circle_samples(2.0)
+    profile = LateralOffsetProfile(wide, np.full(len(wide.s_m), 4.0))
+    narrow = replace(
+        wide,
+        width_left_m=np.full(len(wide.s_m), 3.0),
+        width_right_m=np.full(len(wide.s_m), 3.0),
+    )
+    with pytest.raises(ValueError, match="outside"):
+        build_racing_line_path(narrow, profile)
+
+
+def test_existing_profile_margin_preservation_and_explicit_override():
+    samples = circle_samples(2.0)
+    profile = LateralOffsetProfile(samples, np.full(len(samples.s_m), 3.5), 1.0)
+
+    # No override preserves the profile's margin, and a valid same-track profile works.
+    path = build_racing_line_path(samples, profile)
+    assert np.all(np.isfinite(path.x_m))
+
+    with pytest.raises(ValueError, match="outside"):
+        build_racing_line_path(samples, profile, boundary_margin_m=2.0)
+
+    # Preserving a profile margin is observable when the supplied track cannot
+    # accommodate that margin, even though the zero offsets alone would fit.
+    zero_with_margin = LateralOffsetProfile(samples, np.zeros(len(samples.s_m)), 1.0)
+    too_narrow_for_margin = replace(
+        samples,
+        width_left_m=np.full(len(samples.s_m), 0.5),
+        width_right_m=np.full(len(samples.s_m), 0.5),
+    )
+    with pytest.raises(ValueError, match="margin exceeds"):
+        build_racing_line_path(too_narrow_for_margin, zero_with_margin)
+
+
 def test_profile_input_validation_and_immutability():
     samples = circle_samples(2.0); count = len(samples.s_m)
     for invalid in (np.zeros((count, 1)), np.zeros(count - 1), np.r_[np.zeros(count - 1), np.nan],
@@ -93,3 +129,36 @@ def test_test_oval_paths_feed_generic_periodic_speed_solver():
         assert result.converged and result.lap_time_s > 0
         assert np.all(np.isfinite(result.speed_mps)) and result.speed_mps[0] > 0
         assert np.all(result.speed_mps <= result.speed_limit_lateral_mps + 1e-10)
+
+
+def test_smooth_periodic_nonconstant_offset_geometry_and_solver():
+    samples = circle_samples(1.0)
+    offset = 1.5 * np.sin(2 * math.pi * samples.s_m / samples.total_length_m)
+    profile = LateralOffsetProfile(samples, offset, boundary_margin_m=1.0)
+    path = build_racing_line_path(samples, profile)
+
+    assert np.all(np.isfinite(path.x_m)) and np.all(np.isfinite(path.y_m))
+    assert path.q_m[0] == 0.0 and np.all(np.diff(path.q_m) > 0.0)
+    assert path.total_length_m > path.q_m[-1]
+    assert np.all(np.isfinite(path.curvature_1pm))
+    assert profile.minimum_boundary_clearance_m(samples) >= profile.boundary_margin_m
+    assert np.all(path.segment_lengths_m > 0.0)
+
+    bike = load_motorcycle_config("examples/motorcycles/test_motorcycle.yaml")
+    result = solve_speed_profile(path, bike)
+    assert result.converged and np.isfinite(result.lap_time_s) and result.lap_time_s > 0.0
+
+
+def test_zero_offset_r6_lap_time_difference_reduces_with_refinement():
+    track = Track.from_yaml("examples/tracks/test_oval.yaml")
+    bike = load_motorcycle_config("examples/motorcycles/r6_2017plus_reference.yaml")
+    differences = []
+    for spacing_m in (2.0, 1.0, 0.5):
+        samples = sample_track(track, spacing_m)
+        centreline = solve_speed_profile(from_sampled_track(samples), bike)
+        generated = solve_speed_profile(
+            build_racing_line_path(samples, np.zeros(len(samples.s_m))), bike
+        )
+        differences.append(abs(centreline.lap_time_s - generated.lap_time_s))
+
+    assert differences[2] < differences[1] < differences[0]
