@@ -25,6 +25,7 @@ class SampledTrack:
     width_left_m: FloatArray
     width_right_m: FloatArray
     total_length_m: float
+    closed: bool = True
 
 
 def sample_track(track: Track, spacing_m: float, *, include_endpoint: bool | None = None) -> SampledTrack:
@@ -53,4 +54,4 @@ def sample_track(track: Track, spacing_m: float, *, include_endpoint: bool | Non
     nx, ny = -ty, tx
     return SampledTrack(s, x, y, heading, tx, ty, nx, ny, curvature,
                         np.full_like(s, track.width_left_m),
-                        np.full_like(s, track.width_right_m), track.total_length_m)
+                        np.full_like(s, track.width_right_m), track.total_length_m, track.closed)
