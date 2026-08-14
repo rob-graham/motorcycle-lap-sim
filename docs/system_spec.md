@@ -17,9 +17,10 @@ The architecture deliberately separates four concepts:
    A future `racing_line` package will represent a periodic path and validate
    it against track boundaries. It will not solve vehicle speed.
 3. **Fixed-path motorcycle simulation — for a supplied path, what is the
-   fastest physically feasible periodic speed profile?** Future `motorcycle`
-   configuration and `speed_solver` modules will expose forces and constraints,
-   then calculate speed, acceleration, lap time, and diagnostics for an
+   fastest physically feasible periodic speed profile?** The Phase 2
+   `motorcycle` package now exposes independently validated configuration,
+   forces, and constraints; a future `speed_solver` will use them to
+   calculate speed, acceleration, lap time, and diagnostics for an
    immutable supplied path. This capability must be built and validated before
    optimisation.
 4. **Racing-line optimisation — which permissible path minimises calculated
@@ -42,11 +43,17 @@ and `s=total_length` is absent. Callers may explicitly request the endpoint.
 Open tracks include both ends. Primitive joins are represented only once where
 a sampling location falls exactly on a join.
 
-## Future modules (not implemented in Phase 1)
+## Phase 2 motorcycle physics
+
+The `motorcycle` package provides immutable YAML configuration, deterministic
+engine interpolation, explicit gearing, resistance forces, longitudinal axle
+loads, geometry-derived tip-over limits, lateral caps, and a generic friction
+ellipse. Each formula is usable without track geometry or plotting. It does not
+propagate speed or select gears.
+
+## Future modules (not implemented in Phase 2)
 
 - `racing_line`: path representation, interpolation, and boundary validation.
-- `motorcycle`: explicit mass, geometry, tyres, aerodynamics, powertrain, and
-  control-limit configuration plus clearly identified physical formulas.
 - `speed_solver`: fastest feasible periodic speed on one fixed path and
   transparent constraint diagnostics.
 - `optimisation`: racing-line parameterisation and minimum-time optimisation.
