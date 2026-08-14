@@ -1,9 +1,12 @@
 import math
+import argparse
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
+from motorcycle_lap_sim.optimisation.diagnostics import positive_finite
 from motorcycle_lap_sim.path import (SampledPath, curvature_gradient_1pm2,
                                      curvature_transient_speed_limit_mps, from_sampled_track)
 from motorcycle_lap_sim.speed_solver import solve_speed_profile
@@ -67,3 +70,10 @@ def test_disabled_diagnostics_are_nonrestrictive_and_regression_exact():
     assert first.lap_time_s == second.lap_time_s
     assert np.array_equal(first.speed_mps, second.speed_mps)
     assert np.all(np.isinf(first.speed_limit_curvature_transient_mps))
+
+
+def test_diagnostic_override_accepts_only_positive_finite_values():
+    assert positive_finite("0.8") == 0.8
+    for value in ("0", "-1", "nan", "inf", "not-a-number"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            positive_finite(value)

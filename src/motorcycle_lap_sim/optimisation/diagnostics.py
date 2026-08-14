@@ -2,17 +2,30 @@
 
 import argparse
 import csv
+from dataclasses import replace
+from math import isfinite
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from motorcycle_lap_sim.motorcycle.config import load_motorcycle_config
+from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
 from motorcycle_lap_sim.racing_line import build_racing_line_path
 from motorcycle_lap_sim.track import Track, sample_track
 from motorcycle_lap_sim.track.boundaries import calculate_boundaries
 from .objective import evaluate_racing_line
 from .optimiser import OptimisationConfig, optimise_racing_line
 from .parameterisation import PeriodicCubicParameterisation
+
+
+def positive_finite(value: str) -> float:
+    """Parse a positive finite diagnostic override in SI units."""
+    try:
+        result = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number") from error
+    if not isfinite(result) or result <= 0:
+        raise argparse.ArgumentTypeError("must be positive and finite")
+    return result
 
 
 def write_csv(filename, samples, evaluation):
@@ -63,9 +76,13 @@ def main():
     parser.add_argument("--max-sweeps", type=int, default=30)
     parser.add_argument("--max-evaluations", type=int, default=500)
     parser.add_argument("--boundary-margin", type=float, default=0.25)
+    parser.add_argument("--curvature-rate-limit", type=positive_finite, metavar="VALUE",
+                        help="temporarily override/add the path-curvature-rate limit [1/(m*s)]")
     parser.add_argument("--output-csv", type=Path); parser.add_argument("--output-png", type=Path)
     args = parser.parse_args()
     track, bike = Track.from_yaml(args.track), load_motorcycle_config(args.motorcycle)
+    if args.curvature_rate_limit is not None:
+        bike = replace(bike, handling=HandlingConfig(args.curvature_rate_limit))
     samples = sample_track(track, args.spacing)
     config = OptimisationConfig(args.controls, args.control_bound, args.initial_step,
         args.minimum_step, 0.5, 1e-6, args.max_sweeps, args.max_evaluations,
@@ -82,6 +99,11 @@ def main():
     print(f"optimisation sample spacing: {args.spacing:.3f} m")
     print(f"validation sample spacing: {args.validation_spacing:.3f} m")
     print(f"control count: {args.controls}"); print(f"boundary margin: {args.boundary_margin:.3f} m")
+    if bike.handling is None:
+        print("curvature transient limit: disabled")
+    else:
+        print("curvature transient limit: "
+              f"{bike.handling.max_path_curvature_rate_1pmps:.6f} 1/(m*s)")
     print(f"initial lap time: {result.initial_lap_time_s:.9f} s")
     print(f"optimised lap time: {result.best_lap_time_s:.9f} s")
     print(f"improvement: {result.improvement_s:.9f} s ({result.improvement_percent:.6f}%)")

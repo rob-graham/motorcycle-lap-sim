@@ -20,4 +20,35 @@ Both the curvature gradient and the resulting actual curvature rate are sampled 
 
 This constraint is a **path-curvature transient proxy**, introduced so rapid path-curvature changes are not free in a minimum-time calculation. It is not a validated handlebar or steering-rate model. It omits steering-head kinematics, trail/rake dynamics, countersteering force, rider dynamics, suspension, and other motorcycle dynamics.
 
-The R6 reference value 0.8 1/(m*s) is **LEGACY-REFERENCE / PROVISIONAL**. It is not a measured R6 steering-rate value and the sensitivity diagnostic must not be used to claim otherwise. When `handling` is absent, the feature is disabled; the ceiling is infinity and earlier-phase numerical behaviour is preserved.
+### Track centreline, racing line, and motorcycle response
+
+The **track centreline** may deliberately be piecewise straight and circular.
+Its curvature may be discontinuous where those convenient specification
+primitives join; such a discontinuity is not a track-modelling error and is not
+smoothed by this feature.
+
+The **racing line** represents the motorcycle trajectory. It may become
+smoother than the underlying centreline. Future work will improve racing-line
+geometry independently of the simple track primitives. In particular, smooth
+planar x/y splines, guide-point interpolation, and alternative racing-line
+curvature calculations are deferred, as are roll-rate, lean-angle-rate,
+steering-head dynamics, clothoid primitives, and changes to primitive
+definitions.
+
+For **motorcycle response**, a disabled transient limit is the idealised
+instantaneous-response interpretation. Enabling it selects an optional finite
+path-curvature-response proxy. Neither choice is universally correct, and
+neither changes the actual track geometry.
+
+The R6 reference value 0.8 1/(m*s) is **LEGACY-REFERENCE / PROVISIONAL**. It is
+not a measured R6 steering, roll, or lean-rate value and the sensitivity
+diagnostic must not be used to claim otherwise. It is disabled by default.
+When `handling` is absent, the ceiling is infinity and earlier-phase numerical
+behaviour is preserved. The diagnostic can apply it temporarily with
+`--curvature-rate-limit 0.8`; it does not edit the YAML configuration.
+
+Simple motorcycle-response approximations should not be allowed to create
+large unexplained changes in predicted lap time. Handling-model effects must
+always be reported relative to the disabled/ideal-response baseline. Large
+differences are sensitivity requiring investigation, not automatically a more
+accurate result.

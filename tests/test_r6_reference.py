@@ -31,6 +31,7 @@ def r6():
 
 
 def test_r6_reference_loads_with_six_gears_and_ordered_torque_curve(r6):
+    assert r6.handling is None
     assert len(r6.powertrain.gear_ratios) == 6
     rpms = [point.rpm for point in r6.powertrain.torque_curve]
     assert all(left < right for left, right in zip(rpms, rpms[1:]))

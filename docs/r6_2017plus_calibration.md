@@ -131,4 +131,10 @@ and exact model-year reconstruction are intentionally deferred.
 
 ## Path-curvature transient proxy — LEGACY-REFERENCE / PROVISIONAL
 
-`legacy/bike_params_r6.csv` contained `kappa_dot_max = 0.8` and the old file also enabled its steer-rate cap. Its precise physical provenance and interpretation are unknown. Phase 6 therefore uses 0.8 1/(m*s) only as a provisional calibration for the path-curvature transient proxy. It is **not** a measured R6 steering-rate value and does not validate a handlebar-dynamics model. The legacy CSV remains unchanged.
+`legacy/bike_params_r6.csv` contained `kappa_dot_max = 0.8`. Its exact physical
+provenance is unknown. Phase 6 interprets 0.8 1/(m*s) as an experimental
+path-curvature-rate proxy, marked **LEGACY-REFERENCE / PROVISIONAL**. It is not
+enabled in the normal R6 reference configuration and is not claimed to be a
+measured R6 steering, roll, or lean-rate limit. It may be selected explicitly
+for sensitivity work with the optimisation diagnostic's
+`--curvature-rate-limit 0.8` override. The legacy CSV remains unchanged.
