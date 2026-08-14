@@ -26,6 +26,18 @@ The installed `pytest` console command is an optional shortcut. On Windows,
 the Python Scripts directory containing installed console commands may not be
 on `PATH`.
 
+## Motorcycle diagnostics
+
+From the repository root:
+
+```bash
+python -m motorcycle_lap_sim.motorcycle.diagnostics \
+    examples/motorcycles/test_motorcycle.yaml
+```
+
+This runs independent motorcycle-model checks; it is not a lap speed
+simulation.
+
 ## Plot the example oval
 
 From the repository root:
