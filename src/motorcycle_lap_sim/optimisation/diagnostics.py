@@ -19,17 +19,22 @@ def write_csv(filename, samples, evaluation):
     with filename.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(("centreline_s_m", "offset_m", "x_m", "y_m", "racing_line_q_m",
-                         "curvature_1pm", "speed_mps", "gear", "engine_rpm"))
+                         "curvature_1pm", "speed_mps", "gear", "engine_rpm",
+                         "curvature_gradient_1pm2", "curvature_rate_1pmps",
+                         "speed_limit_curvature_transient_mps"))
         writer.writerows(zip(samples.s_m, evaluation.dense_offset_m,
             evaluation.sampled_path.x_m, evaluation.sampled_path.y_m,
             evaluation.sampled_path.q_m, evaluation.sampled_path.curvature_1pm,
             evaluation.speed_profile.speed_mps, evaluation.speed_profile.gear_number,
-            evaluation.speed_profile.engine_rpm))
+            evaluation.speed_profile.engine_rpm,
+            evaluation.speed_profile.curvature_gradient_1pm2,
+            evaluation.speed_profile.curvature_rate_1pmps,
+            evaluation.speed_profile.speed_limit_curvature_transient_mps))
 
 
 def plot_result(samples, baseline, optimised, filename):
     boundaries = calculate_boundaries(samples)
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, (ax, speed_ax) = plt.subplots(2, 1, figsize=(10, 9))
     ax.plot(boundaries.left_x_m, boundaries.left_y_m, "k--", label="left boundary")
     ax.plot(boundaries.right_x_m, boundaries.right_y_m, "k--", label="right boundary")
     ax.plot(samples.x_m, samples.y_m, color="0.6", label="centreline")
@@ -37,6 +42,12 @@ def plot_result(samples, baseline, optimised, filename):
     ax.plot(optimised.sampled_path.x_m, optimised.sampled_path.y_m,
             label="locally optimised racing line")
     ax.axis("equal"); ax.set_xlabel("x (m)"); ax.set_ylabel("y (m)"); ax.legend()
+    profile = optimised.speed_profile
+    speed_ax.plot(optimised.sampled_path.q_m, profile.speed_mps, label="solved speed")
+    speed_ax.plot(optimised.sampled_path.q_m, profile.speed_limit_curvature_transient_mps,
+                  "--", label="curvature-transient ceiling")
+    speed_ax.set_xlabel("path distance q (m)"); speed_ax.set_ylabel("speed (m/s)")
+    speed_ax.legend(); speed_ax.grid(True)
     fig.savefig(filename, dpi=150, bbox_inches="tight"); plt.close(fig)
 
 
@@ -85,6 +96,8 @@ def main():
     print(f"zero-control validation lap time: {fine_zero.lap_time_s:.9f} s")
     print(f"optimised-control validation lap time: {fine_best.lap_time_s:.9f} s")
     print(f"validation improvement: {fine_zero.lap_time_s - fine_best.lap_time_s:.9f} s")
+    print(f"maximum |curvature rate|: {np.max(np.abs(fine_best.speed_profile.curvature_rate_1pmps)):.9f} 1/(m*s)")
+    print(f"maximum |curvature gradient|: {np.max(np.abs(fine_best.speed_profile.curvature_gradient_1pm2)):.9f} 1/m^2")
     if args.output_csv: write_csv(args.output_csv, fine, fine_best)
     if args.output_png: plot_result(fine, fine_zero, fine_best, args.output_png)
 

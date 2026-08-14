@@ -128,3 +128,7 @@ and exact model-year reconstruction are intentionally deferred.
     "Chassis" technical specification (accessed 14 August 2026). The current
     factory specification corroborates the unchanged 2017+ chassis wheelbase;
     it is not used as provenance for any other parameter in this register.
+
+## Path-curvature transient proxy — LEGACY-REFERENCE / PROVISIONAL
+
+`legacy/bike_params_r6.csv` contained `kappa_dot_max = 0.8` and the old file also enabled its steer-rate cap. Its precise physical provenance and interpretation are unknown. Phase 6 therefore uses 0.8 1/(m*s) only as a provisional calibration for the path-curvature transient proxy. It is **not** a measured R6 steering-rate value and does not validate a handlebar-dynamics model. The legacy CSV remains unchanged.

@@ -82,3 +82,7 @@ deterministic bounded coordinate pattern search. It returns a locally and
 numerically optimised racing line and explicitly supports finer-resolution
 re-evaluation. It makes no global-optimality claim and introduces no new
 optimisation dependency.
+
+## Phase 6 optional path-handling proxy
+
+Motorcycle YAML may contain `handling.max_path_curvature_rate_1pmps`, a finite, strictly positive limit in 1/(m*s). Omitting `handling` disables it without a default. The fixed-path capability layer calculates the periodic curvature gradient and combines its speed ceiling with existing local ceilings. Racing-line optimisation remains formula-agnostic and sees only the resulting lap time. See [the curvature transient specification](curvature_transient_limit.md).
