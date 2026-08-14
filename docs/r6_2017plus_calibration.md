@@ -20,7 +20,7 @@ individual values later without changing the solver architecture.
 | `gravity_mps2` | 9.81 m/s² | PROVISIONAL / ASSUMED | Standard reference environment, not a track measurement. |
 | `air_density_kgpm3` | 1.225 kg/m³ | PROVISIONAL / ASSUMED | Standard reference environment, not weather data. |
 | `mass_kg` | 265.0 kg | LEGACY-REFERENCE / PROVISIONAL | Approximate combined motorcycle-and-rider system mass; **not** Yamaha's published wet-bike mass. |
-| `wheelbase_m` | 1.375 m | FACTORY-SOURCED | Reference wheelbase for the 2017+ R6 family. |
+| `wheelbase_m` | 1.375 m | FACTORY-SOURCED | Reference wheelbase for the 2017+ R6 family; Yamaha's official R6 RACE specifications list a 1,375 mm wheelbase.[^yamaha-wheelbase] |
 | `cg_height_m` | 0.625 m | DERIVED-FROM-LEGACY / PROVISIONAL | Chosen to approximate legacy longitudinal limits; not a measured R6 coordinate. |
 | `cg_from_rear_m` | 0.625 m | DERIVED-FROM-LEGACY / PROVISIONAL | Chosen to approximate legacy longitudinal limits; not a measured R6 coordinate. |
 | `wheel_radius_m` | 0.31 m | LEGACY-REFERENCE / PROVISIONAL | Effective rolling radius remains unvalidated. |
@@ -90,6 +90,12 @@ These cases quantify sensitivity; they do not establish which CG is correct.
 The resulting lap-time predictions are provisional because CG and several
 other influential inputs are provisional.
 
+Reproduce the table from the repository root with:
+
+```bash
+python scripts/r6_cg_sensitivity.py
+```
+
 ## Baseline diagnostic record
 
 The motorcycle diagnostic reports 45.45% static front load, 54.55% static
@@ -117,3 +123,8 @@ python -m motorcycle_lap_sim.speed_solver.diagnostics \
 
 Racing-line representation and optimisation, measured-data identification,
 and exact model-year reconstruction are intentionally deferred.
+
+[^yamaha-wheelbase]: Yamaha Motor Europe, [R6 RACE specifications](https://www.yamaha-motor.eu/gb/en/motorcycles/supersport/pdp/r6-race-2025/),
+    "Chassis" technical specification (accessed 14 August 2026). The current
+    factory specification corroborates the unchanged 2017+ chassis wheelbase;
+    it is not used as provenance for any other parameter in this register.
