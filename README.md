@@ -1,17 +1,19 @@
 # Motorcycle Lap Simulation
 
 A clean-sheet Python project for minimum-lap-time motorcycle simulation and
-racing-line optimisation. **Phase 1 only defines and samples track geometry; it
-does not simulate motorcycle speed, dynamics, or optimise a racing line.**
+racing-line optimisation. **Phase 2 adds independently validated motorcycle
+configuration and physical formulas, but still does not calculate a lap speed
+profile, lap time, or racing line.**
 
 ## Architecture and status
 
 The numerical `track` package contains analytic centreline primitives, ordered
 tracks, closure diagnostics, arc-length sampling, and boundary calculation.
-Plotting is a separate, optional consumer of those numerical results. Future
-phases will add distinct racing-line, motorcycle, fixed-path speed-solver, and
-optimisation packages; see [the system specification](docs/system_spec.md).
-All internal geometry uses metres, radians, and inverse metres.
+The independent `motorcycle` package contains immutable validated configuration,
+engine and powertrain calculations, forces, load transfer, and physical limits.
+Plotting remains separate. Future phases will add distinct racing-line,
+fixed-path speed-solver, and optimisation packages; see
+[the system specification](docs/system_spec.md). Internal calculations use SI.
 
 ## Install and test
 
@@ -23,6 +25,18 @@ python -m pytest
 The installed `pytest` console command is an optional shortcut. On Windows,
 the Python Scripts directory containing installed console commands may not be
 on `PATH`.
+
+## Motorcycle diagnostics
+
+From the repository root:
+
+```bash
+python -m motorcycle_lap_sim.motorcycle.diagnostics \
+    examples/motorcycles/test_motorcycle.yaml
+```
+
+This runs independent motorcycle-model checks; it is not a lap speed
+simulation.
 
 ## Plot the example oval
 
