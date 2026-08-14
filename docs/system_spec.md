@@ -62,3 +62,7 @@ propagate speed or select gears.
 Interfaces will pass typed configuration and result objects. The track, racing
 line, motorcycle model, speed solver, and optimiser remain independently
 testable and contain no duplicated hidden logic or mutable global state.
+
+## Phase 3 status
+
+The solver calculates speed and lap time on a supplied fixed, closed path. Track-centreline sampling is an adapter only; racing-line optimisation remains outside the current system.

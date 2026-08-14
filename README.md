@@ -53,3 +53,7 @@ optional shortcut, with the same Windows `PATH` caveat described above.
 
 The YAML format records a start pose, distinct left/right widths, closure
 intent, and an ordered list of straight and circular-arc primitives.
+
+## Phase 3 fixed-path solver
+
+Phase 3 calculates a periodic minimum-time speed profile on a supplied fixed closed path, currently demonstrated on the sampled track centreline. It does not optimise a racing line. See [the fixed-path solver](docs/fixed_path_solver.md).
