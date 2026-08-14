@@ -1,8 +1,8 @@
 # Motorcycle Lap Simulation
 
 A clean-sheet Python project for minimum-lap-time motorcycle simulation and
-racing-line optimisation. Phase 4 adds a validated representation of a supplied
-racing line on top of the fixed-path solver; it does not optimise a line.
+racing-line optimisation. Phase 5 adds a deterministic first locally optimised
+minimum-lap-time racing line on top of the validated fixed-path architecture.
 
 ## Architecture and status
 
@@ -11,7 +11,8 @@ tracks, closure diagnostics, arc-length sampling, and boundary calculation.
 The independent `motorcycle` package contains immutable validated configuration,
 engine and powertrain calculations, forces, load transfer, and physical limits.
 Plotting remains separate. The distinct `racing_line` package constructs a
-generic `SampledPath`; a future phase will add optimisation; see
+generic `SampledPath`; the separate `optimisation` package varies a smooth,
+periodic, boundary-safe line and minimises solved lap time; see
 [the system specification](docs/system_spec.md). Internal calculations use SI.
 
 ## Install and test
@@ -110,3 +111,18 @@ python -m motorcycle_lap_sim.racing_line.diagnostics \
 
 The `+2 m` example is deterministic manual geometry for inspection, not an
 optimal line.
+
+## Phase 5 local racing-line optimisation
+
+Phase 5 uses a low-dimensional periodic cubic parameterisation and deterministic
+bounded pattern search, without SciPy. Its result is numerical and local, not a
+claim of global optimality. See [racing-line optimisation](docs/racing_line_optimisation.md).
+
+```bash
+python -m motorcycle_lap_sim.optimisation.diagnostics \
+  examples/tracks/test_oval.yaml \
+  examples/motorcycles/r6_2017plus_reference.yaml \
+  --spacing 1.0 --validation-spacing 0.5 --controls 12 \
+  --boundary-margin 0.25 --output-csv optimised-line.csv \
+  --output-png optimised-line.png
+```

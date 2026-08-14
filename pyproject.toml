@@ -17,6 +17,7 @@ test = ["pytest>=7.4"]
 plot-example-track = "motorcycle_lap_sim.plotting.track_plot:main"
 fixed-path-diagnostics = "motorcycle_lap_sim.speed_solver.diagnostics:main"
 racing-line-diagnostics = "motorcycle_lap_sim.racing_line.diagnostics:main"
+racing-line-optimisation = "motorcycle_lap_sim.optimisation.diagnostics:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
