@@ -22,3 +22,7 @@ are absent. `shift_rpm` is not necessarily a physical rev limit. Old direct
 wheelie/braking acceleration limits must not replace geometry-derived limits.
 Finally, `kappa_dot` / steering-rate modelling belongs to a later
 path/vehicle-dynamics stage.
+
+The legacy values that were deliberately carried into the provisional
+fixed-path reference, their provenance, and the calibration limitations are
+recorded in the [2017+ R6 reference calibration](r6_2017plus_calibration.md).

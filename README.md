@@ -72,3 +72,25 @@ speed ceilings, the solved speed, lateral and longitudinal acceleration, gear,
 and engine RPM. The console summary reports the sample count and path length,
 lap time, speed statistics, peak accelerations, gear and RPM ranges, and solver
 iteration/convergence information.
+
+## Provisional 2017+ Yamaha YZF-R6 reference
+
+The repository includes a provisional stock-like 2017+ R6 reference. It is not
+an exact model-year reconstruction or an experimentally validated motorcycle;
+see the [calibration and provenance record](docs/r6_2017plus_calibration.md).
+Run its independent motorcycle and fixed-path diagnostics from the repository
+root:
+
+```bash
+python -m motorcycle_lap_sim.motorcycle.diagnostics \
+    examples/motorcycles/r6_2017plus_reference.yaml
+
+python -m motorcycle_lap_sim.speed_solver.diagnostics \
+    examples/tracks/test_oval.yaml \
+    examples/motorcycles/r6_2017plus_reference.yaml \
+    --spacing 1.0 --csv r6_2017plus_test_oval.csv
+```
+
+The inline torque curve is a smooth stock-like rear-wheel estimate. The
+reported lap time consequently remains provisional and must not be interpreted
+as experimental validation.
