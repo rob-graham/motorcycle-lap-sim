@@ -45,6 +45,10 @@ def best_gear(speed_mps: float, bike: MotorcycleConfig) -> GearChoice:
     for gear in range(1, len(bike.powertrain.gear_ratios)+1):
         ratio = overall_ratio(bike.powertrain, gear)
         rpm = engine_speed_rpm(speed_mps, bike.motorcycle.wheel_radius_m, ratio)
+        # Converting the rev ceiling to road speed and back can land a few
+        # ulps above the ceiling.  Treat that round trip as exactly on-limit.
+        if abs(rpm-bike.powertrain.rev_limit_rpm) <= 1e-9*bike.powertrain.rev_limit_rpm:
+            rpm=bike.powertrain.rev_limit_rpm
         torque = available_engine_torque_nm(rpm, bike.powertrain)
         force = rear_wheel_drive_force_n(torque, ratio, bike.powertrain.driveline_efficiency,
                                          bike.motorcycle.wheel_radius_m) if torque > 0 else 0.0
@@ -73,7 +77,12 @@ def forward_acceleration_capability(speed_mps, curvature_1pm, bike, numerical=Nu
         tyre=maximum_longitudinal_force_n(fyr,loads.rear_n,bike.tyres.mu_longitudinal,bike.tyres.mu_lateral)
         return min(choice.drive_force_n,tyre)-(m*a+drag+roll)
     low=-(drag+roll)/m
-    if margin(low) < 0: low=-bike.environment.gravity_mps2*10
+    # ``low`` is the exact coasting solution when no propulsive force is
+    # available.  Floating-point roundoff in ``m * low + drag + roll`` must
+    # not turn that useful (and physically meaningful) lower bound into the
+    # deliberately remote fallback bound.
+    if margin(low) < -numerical.acceleration_tolerance_mps2 * m:
+        low=-bike.environment.gravity_mps2*10
     hi=upper
     for _ in range(numerical.bisection_iterations):
         mid=(low+hi)/2
