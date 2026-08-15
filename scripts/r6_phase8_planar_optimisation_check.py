@@ -268,6 +268,39 @@ def selected_policies(selection):
         item for item in NAMED_POLICIES if item[0] == selection)
 
 
+def snap_projected_control_roundoff(projected, lower, upper):
+    """Snap only floating-point-scale target-bound projection excesses.
+
+    This is a representational repair, not a corridor tolerance: values farther
+    outside either bound than 64 machine epsilons at the value/bound scale are
+    deliberately left outside for the caller to reject.
+    """
+    projected = np.asarray(projected, dtype=float).copy()
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    epsilon_scale = 64.0 * np.finfo(float).eps
+
+    below = projected < lower
+    lower_tolerance = epsilon_scale * np.maximum.reduce(
+        (np.ones_like(projected), np.abs(projected), np.abs(lower)))
+    snap_lower = below & ((lower - projected) <= lower_tolerance)
+
+    above = projected > upper
+    upper_tolerance = epsilon_scale * np.maximum.reduce(
+        (np.ones_like(projected), np.abs(projected), np.abs(upper)))
+    snap_upper = above & ((projected - upper) <= upper_tolerance)
+
+    corrections = np.zeros_like(projected)
+    corrections[snap_lower] = lower[snap_lower] - projected[snap_lower]
+    corrections[snap_upper] = upper[snap_upper] - projected[snap_upper]
+    snapped = snap_lower | snap_upper
+    projected[snap_lower] = lower[snap_lower]
+    projected[snap_upper] = upper[snap_upper]
+    snap_count = int(np.count_nonzero(snapped))
+    snap_max_m = float(np.max(np.abs(corrections[snapped]))) if snap_count else 0.0
+    return projected, snap_count, snap_max_m
+
+
 def project_initial_controls(track, source_policy, target_policy, source_csv,
                              boundary_margin_m, sample_spacing_m=1.0,
                              boundary_check_spacing_m=0.25):
@@ -302,6 +335,8 @@ def project_initial_controls(track, source_policy, target_policy, source_csv,
                          f"station {target_s[index]:.9g} m")
     target_lower, target_upper = planar_control_bounds(
         track, target_s, boundary_margin_m)
+    projected, snap_count, snap_max_m = snap_projected_control_roundoff(
+        projected, target_lower, target_upper)
     outside = (projected < target_lower) | (projected > target_upper)
     if np.any(outside):
         index = int(np.flatnonzero(outside)[0])
@@ -324,7 +359,8 @@ def project_initial_controls(track, source_policy, target_policy, source_csv,
     target_dense_x, target_dense_y, *_ = target_line.spline.evaluate(dense_s)
     max_difference = float(np.max(np.hypot(
         source_dense_x - target_dense_x, source_dense_y - target_dense_y)))
-    return projected, source_s, target_s, target_line, max_difference
+    return (projected, source_s, target_s, target_line, max_difference,
+            snap_count, snap_max_m)
 
 
 def metrics(label, result, restarted=False):
@@ -359,7 +395,8 @@ def run_selected_optimisation(parser, args, track, bike, policy_name, policy,
         source_policy = dict(NAMED_POLICIES)[args.project_source_policy]
         try:
             (initial_controls, source_stations, projected_stations,
-             projected_line, transfer_difference) = project_initial_controls(
+             projected_line, transfer_difference, boundary_snap_count,
+             boundary_snap_max_m) = project_initial_controls(
                 track, source_policy, policy, args.project_initial_controls_csv,
                 config.boundary_margin_m, config.optimisation_sample_spacing_m,
                 config.boundary_check_spacing_m)
@@ -374,6 +411,8 @@ def run_selected_optimisation(parser, args, track, bike, policy_name, policy,
         print(f"projected_target_policy={policy_name}")
         print(f"projected_source_controls={len(source_stations)}")
         print(f"projected_target_controls={len(projected_stations)}")
+        print(f"projected_boundary_snap_count={boundary_snap_count}")
+        print(f"projected_boundary_snap_max_m={boundary_snap_max_m:.17g}")
         print(f"projected_offset_min_m={np.min(initial_controls):.9f}")
         print(f"projected_offset_max_m={np.max(initial_controls):.9f}")
         print(f"projected_minimum_boundary_clearance_m="

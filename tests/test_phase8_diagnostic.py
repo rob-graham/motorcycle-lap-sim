@@ -19,6 +19,7 @@ load_initial_controls_csv = SCRIPT["load_initial_controls_csv"]
 run_selected_optimisation = SCRIPT["run_selected_optimisation"]
 metrics = SCRIPT["metrics"]
 project_initial_controls = SCRIPT["project_initial_controls"]
+snap_projected_control_roundoff = SCRIPT["snap_projected_control_roundoff"]
 EXTRA_FINE_POLICY = SCRIPT["EXTRA_FINE_POLICY"]
 SCRIPT_GLOBALS = run_selected_optimisation.__globals__
 
@@ -161,8 +162,8 @@ def test_projection_validates_source_layout_and_uses_spline_normal_projection(tm
     write_controls(path, source_s, source_controls, source_lower, source_upper,
                    np.arange(len(source_s)))
 
-    projected, loaded_source_s, target_s, target_line, _ = project_initial_controls(
-        track, source_policy, target_policy, path, 0.25)
+    (projected, loaded_source_s, target_s, target_line, _, snap_count,
+     snap_max_m) = project_initial_controls(track, source_policy, target_policy, path, 0.25)
     source_line = SCRIPT["build_smooth_racing_line_path"](
         track, source_controls, guide_s_m=source_s, sample_spacing_m=1.0,
         boundary_margin_m=0.25, boundary_check_spacing_m=0.25)
@@ -178,6 +179,8 @@ def test_projection_validates_source_layout_and_uses_spline_normal_projection(tm
     assert np.all(projected >= lower) and np.all(projected <= upper)
     assert target_line.minimum_boundary_clearance_m >= -1e-10
     assert target_line.minimum_forward_progress > 0.0
+    assert snap_count == 0
+    assert snap_max_m == 0.0
 
     wrong_layout = tmp_path / "wrong.csv"
     target_lower, target_upper = SCRIPT["planar_control_bounds"](track, target_s, 0.25)
@@ -206,6 +209,56 @@ def test_out_of_bounds_projection_fails_without_clipping(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match=r"index 0.*station 0.*value 2.*upper bound 1"):
         project_initial_controls(fake_track, object(), object(), path, 0.0)
+
+
+def test_projection_roundoff_snaps_bounds_exactly_and_preserves_in_bound_values():
+    lower = np.full(4, -3.75)
+    upper = np.full(4, 3.75)
+    values = np.array([-3.7500000000000075, 3.7500000000000075, -1.25, 2.5])
+
+    repaired, count, maximum = snap_projected_control_roundoff(values, lower, upper)
+
+    assert repaired[0] == lower[0]
+    assert repaired[1] == upper[1]
+    assert np.array_equal(repaired[2:], values[2:])
+    assert count == 2
+    assert maximum == pytest.approx(7.549516567451064e-15)
+
+
+def test_material_projection_excess_is_not_repaired():
+    values = np.array([-3.750000000001])
+    repaired, count, maximum = snap_projected_control_roundoff(
+        values, np.array([-3.75]), np.array([3.75]))
+
+    assert np.array_equal(repaired, values)
+    assert count == 0
+    assert maximum == 0.0
+
+
+def test_projection_mode_reports_boundary_snap_diagnostics(monkeypatch, capsys):
+    args = build_parser().parse_args((
+        "--track", "oval", "--policy", "fine",
+        "--project-initial-controls-csv", "source.csv",
+        "--project-source-policy", "coarse"))
+    stations = np.array([0.0])
+    projected_line = SimpleNamespace(
+        minimum_boundary_clearance_m=0.0, minimum_forward_progress=1.0)
+    monkeypatch.setitem(SCRIPT_GLOBALS, "project_initial_controls", lambda *args: (
+        np.array([-3.75]), np.array([0.0]), stations, projected_line, 0.0,
+        1, 7.549516567451064e-15))
+    monkeypatch.setitem(SCRIPT_GLOBALS, "timed_optimisation", lambda *args, **kwargs: object())
+    monkeypatch.setitem(SCRIPT_GLOBALS, "metrics", lambda *args, **kwargs: None)
+
+    run_selected_optimisation(
+        object(), args, object(), object(), "fine", object(),
+        SimpleNamespace(boundary_margin_m=0.25,
+                        optimisation_sample_spacing_m=1.0,
+                        boundary_check_spacing_m=0.25),
+        stations)
+
+    output = capsys.readouterr().out
+    assert "projected_boundary_snap_count=1" in output
+    assert "projected_boundary_snap_max_m=7.5495165674510645e-15" in output
 
 
 def test_no_restart_preserves_zero_start_and_metric_wording(monkeypatch):
