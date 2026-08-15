@@ -40,6 +40,7 @@ def test_targeted_cli_selection():
     assert optimisation_config(args).max_sweeps == 100
     assert optimisation_config(args).max_evaluations == 25
     assert optimisation_config(args).parallel_workers == 2
+    assert optimisation_config(args).initial_step_m == 1.0
     assert [name for name, _ in selected_tracks(args.track)] == ["oval"]
     assert [name for name, _ in selected_policies(args.policy)] == ["fine"]
 
@@ -48,6 +49,20 @@ def test_parser_accepts_initial_controls_csv():
     args = build_parser().parse_args(("--track", "mallala", "--policy", "reference",
                                       "--initial-controls-csv", "saved.csv"))
     assert args.initial_controls_csv == Path("saved.csv")
+
+
+def test_initial_step_cli_is_passed_to_optimisation_config():
+    args = build_parser().parse_args(("--initial-step-m", "0.25"))
+
+    assert optimisation_config(args).initial_step_m == 0.25
+
+
+@pytest.mark.parametrize("value", ["0", "-0.25"])
+def test_non_positive_initial_step_uses_config_validation(value):
+    args = build_parser().parse_args(("--initial-step-m", value))
+
+    with pytest.raises(ValueError, match="step and spacing values must be finite and positive"):
+        optimisation_config(args)
 
 
 @pytest.mark.parametrize("option,value,message", [
@@ -146,6 +161,7 @@ def test_complete_diagnostic_is_default():
         "coarse", "reference", "fine",
     ]
     assert args.workers == 1
+    assert args.initial_step_m == 1.0
 
 
 def test_half_lap_symmetry_differences_require_repeated_even_station_layout():
