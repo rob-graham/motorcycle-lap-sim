@@ -90,3 +90,20 @@ Motorcycle YAML may contain `handling.max_path_curvature_rate_1pmps`, a finite, 
 ## Phase 7 geometry boundary
 
 The track remains a piecewise straight/circular analytic definition and may have curvature jumps. Experimental Phase 7 converts supplied offset guides into a C2-periodic Cartesian spline, then adapts it to the same generic `SampledPath` consumed by the track-unaware fixed-path solver. Existing Phase 5 geometry remains the optimiser default pending validation.
+
+## Phase 7.5 track widths and reference integration
+
+Track-wide left/right half-widths remain defaults. `Track` resolves one finite,
+positive left and right width for every primitive from optional independent
+primitive overrides. `SampledTrack` remains the interface to downstream code
+and carries these values as per-sample arrays. At an exact join, the existing
+right-sided primitive lookup assigns the station (and width) to the next
+primitive. Closed endpoint behaviour is unchanged; widths are stepped rather
+than interpolated. `Straight` and `CircularArc` remain pure analytic centreline
+primitives.
+
+The Mallala v0.3 local-coordinate reference exercises this capability without
+special cases in boundaries, racing-line geometry, paths, or the fixed-path
+solver. Its analytic curvature discontinuities are intentional, and Phase 8
+racing-line optimisation is explicitly deferred. See
+[the reference-track record](mallala_reference_track.md).

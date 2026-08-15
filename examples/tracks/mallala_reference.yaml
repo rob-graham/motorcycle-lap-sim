@@ -1,0 +1,73 @@
+# QGIS-DERIVED / APPROXIMATE REFERENCE GEOMETRY: Mallala centreline fit v0.3.
+# Simulator-local coordinates; the EPSG:7854 fitting coordinates are intentionally omitted.
+start:
+  x_m: 0.0
+  y_m: 0.0
+  heading_rad: 0.0
+width_left_m: 4.0
+width_right_m: 4.0
+closed: true
+primitives:
+  - type: straight # S0a
+    length_m: 178.593280835
+    width_left_m: 5.0
+    width_right_m: 5.0
+  - type: circular_arc # T1
+    radius_m: 43.028200422
+    turn_angle_rad: -0.905587481920
+  - type: straight # S1
+    length_m: 87.056536074
+  - type: circular_arc # T2
+    radius_m: 47.018820106
+    turn_angle_rad: 3.010814343630
+  - type: straight # S2
+    length_m: 326.900076821
+  - type: circular_arc # T3A
+    radius_m: 45.427431431
+    turn_angle_rad: -1.054776680384
+  - type: circular_arc # T3B
+    radius_m: 25.832615646
+    turn_angle_rad: -1.375218892180
+  - type: circular_arc # T3C
+    radius_m: 147.052746048
+    turn_angle_rad: -0.715638234275
+  - type: straight # S3
+    length_m: 203.510024542
+  - type: circular_arc # T4
+    radius_m: 241.127679536
+    turn_angle_rad: -1.054858050243
+  - type: straight # S4
+    length_m: 212.256996860
+  - type: circular_arc # T5
+    radius_m: 15.605397304
+    turn_angle_rad: -2.623954536576
+  - type: straight # S5
+    length_m: 48.906950838
+  - type: circular_arc # T6A
+    radius_m: 76.177689070
+    turn_angle_rad: 0.435938855385
+  - type: circular_arc # T6B
+    radius_m: 184.166185528
+    turn_angle_rad: 1.137520961662
+  - type: straight # S6
+    length_m: 265.942318678
+  - type: circular_arc # T7A
+    radius_m: 19.200206554
+    turn_angle_rad: -1.321884700459
+  - type: circular_arc # T7B
+    radius_m: 37.719668411
+    turn_angle_rad: -1.360272719890
+  - type: straight # S7
+    length_m: 18.312487618
+  - type: circular_arc # T8
+    radius_m: 53.481129008
+    turn_angle_rad: 1.062498247029
+  - type: straight # S8
+    length_m: 27.122002538
+  - type: circular_arc # T9
+    radius_m: 26.085744046
+    turn_angle_rad: -1.517766418981
+  - type: straight # S0b
+    length_m: 108.268695264
+    width_left_m: 5.0
+    width_right_m: 5.0
