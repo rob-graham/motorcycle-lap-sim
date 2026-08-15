@@ -5,8 +5,10 @@ module deliberately does not use the Phase 5 dense offset parameterisation.
 """
 
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
 import math
-from typing import Callable
+import multiprocessing
+from typing import Callable, Iterable
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -74,6 +76,43 @@ class PlanarObjectiveEvaluation:
     failure_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class _PlanarWorkerContext:
+    """Immutable per-process data installed once by the pool initializer."""
+
+    track: Track
+    motorcycle: object
+    control_s_m: NDArray[np.float64]
+    sample_spacing_m: float
+    boundary_margin_m: float
+    boundary_check_spacing_m: float
+
+
+_planar_worker_context: _PlanarWorkerContext | None = None
+
+
+def _initialise_planar_worker(track: Track, motorcycle, control_s_m: NDArray[np.float64],
+                              sample_spacing_m: float, boundary_margin_m: float,
+                              boundary_check_spacing_m: float) -> None:
+    """Install evaluation data in a spawned worker instead of sending it per task."""
+    global _planar_worker_context
+    _planar_worker_context = _PlanarWorkerContext(
+        track, motorcycle, control_s_m, sample_spacing_m, boundary_margin_m,
+        boundary_check_spacing_m)
+
+
+def _evaluate_planar_worker(controls_m: NDArray[np.float64]) -> PlanarObjectiveEvaluation:
+    """Spawn-picklable candidate evaluator used by :class:`ProcessPoolExecutor`."""
+    context = _planar_worker_context
+    if context is None:
+        raise RuntimeError("planar worker evaluation context was not initialized")
+    return evaluate_planar_racing_line(
+        controls_m, context.track, context.motorcycle, context.control_s_m,
+        sample_spacing_m=context.sample_spacing_m,
+        boundary_margin_m=context.boundary_margin_m,
+        boundary_check_spacing_m=context.boundary_check_spacing_m)
+
+
 def evaluate_planar_racing_line(controls_m: ArrayLike, track: Track, motorcycle,
                                 control_s_m: ArrayLike, *, sample_spacing_m: float = 1.0,
                                 boundary_margin_m: float = 0.25,
@@ -103,6 +142,7 @@ class PlanarOptimisationConfig:
     boundary_margin_m: float = 0.25
     boundary_check_spacing_m: float = 0.25
     optimisation_sample_spacing_m: float = 1.0
+    parallel_workers: int = 1
 
     def __post_init__(self) -> None:
         positive = (self.initial_step_m, self.minimum_step_m,
@@ -117,8 +157,9 @@ class PlanarOptimisationConfig:
         if not math.isfinite(self.boundary_margin_m) or self.boundary_margin_m < 0:
             raise ValueError("boundary margin must be finite and non-negative")
         if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
-               for value in (self.max_sweeps, self.max_evaluations)):
-            raise ValueError("sweep and evaluation limits must be positive integers")
+               for value in (self.max_sweeps, self.max_evaluations,
+                              self.parallel_workers)):
+            raise ValueError("sweep, evaluation, and worker limits must be positive integers")
 
 
 @dataclass(frozen=True)
@@ -171,7 +212,9 @@ def _periodic_search_directions(control_count: int) -> tuple[NDArray[np.float64]
 def _best_improvement_pattern_search(
         initial_controls: NDArray[np.float64], lower: NDArray[np.float64],
         upper: NDArray[np.float64], initial_evaluation, evaluate: Callable,
-        config: PlanarOptimisationConfig):
+        config: PlanarOptimisationConfig,
+        evaluate_candidates: Callable[[Iterable[NDArray[np.float64]]],
+                                      Iterable[PlanarObjectiveEvaluation]] | None = None):
     """Poll all coordinate/coupled moves and accept only the best candidate.
 
     Direction and sign order provide deterministic tie-breaking.  A single
@@ -198,10 +241,19 @@ def _best_improvement_pattern_search(
         if evaluations + len(candidate_controls) > config.max_evaluations:
             reason = "maximum evaluations reached"
             break
+        if evaluate_candidates is None:
+            poll_evaluations = [evaluate(item[2]) for item in candidate_controls]
+        else:
+            # Executor.map returns in input order.  Materialising it also makes
+            # worker exceptions propagate before deterministic selection.
+            poll_evaluations = list(evaluate_candidates(
+                item[2] for item in candidate_controls))
+        if len(poll_evaluations) != len(candidate_controls):
+            raise RuntimeError("candidate evaluator returned an unexpected result count")
+        evaluations += len(candidate_controls)
         candidates = []
-        for direction_order, sign_order, candidate, signed_direction in candidate_controls:
-            evaluation = evaluate(candidate)
-            evaluations += 1
+        for ((direction_order, sign_order, candidate, signed_direction),
+             evaluation) in zip(candidate_controls, poll_evaluations):
             candidates.append((evaluation.lap_time_s, direction_order, sign_order,
                                candidate, evaluation, signed_direction))
         polls += 1
@@ -264,8 +316,25 @@ def optimise_planar_racing_line(track: Track, motorcycle,
     def evaluate(candidate):
         return evaluate_planar_racing_line(candidate, track, motorcycle, control_s, **kwargs)
 
-    controls, best, evaluations, sweeps, step, reason = _best_improvement_pattern_search(
-        controls, lower, upper, initial, evaluate, config)
+    if config.parallel_workers == 1:
+        controls, best, evaluations, sweeps, step, reason = _best_improvement_pattern_search(
+            controls, lower, upper, initial, evaluate, config)
+    else:
+        # One persistent pool serves every complete poll.  Pattern moves remain
+        # single parent-process evaluations because they are not parallel work.
+        with ProcessPoolExecutor(
+                max_workers=config.parallel_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=_initialise_planar_worker,
+                initargs=(track, motorcycle, control_s,
+                          config.optimisation_sample_spacing_m,
+                          config.boundary_margin_m,
+                          config.boundary_check_spacing_m)) as executor:
+            controls, best, evaluations, sweeps, step, reason = (
+                _best_improvement_pattern_search(
+                    controls, lower, upper, initial, evaluate, config,
+                    lambda candidates: executor.map(
+                        _evaluate_planar_worker, candidates)))
     improvement = initial.lap_time_s - best.lap_time_s
     assert best.smooth_line is not None and best.speed_profile is not None
     return PlanarOptimisationResult(control_s, initial_controls, controls, lower, upper,

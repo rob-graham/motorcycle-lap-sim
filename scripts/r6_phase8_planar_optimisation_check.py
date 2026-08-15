@@ -43,6 +43,7 @@ def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-evaluations", type=int, default=1500)
     parser.add_argument("--max-sweeps", type=int, default=30)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--track", choices=("oval", "mallala", "both"), default="both")
     parser.add_argument("--policy", choices=("coarse", "reference", "fine", "all"),
                         default="all")
@@ -52,7 +53,8 @@ def build_parser():
 def optimisation_config(args):
     """Build the Phase 8 configuration from diagnostic CLI limits."""
     return PlanarOptimisationConfig(max_sweeps=args.max_sweeps,
-                                    max_evaluations=args.max_evaluations)
+                                    max_evaluations=args.max_evaluations,
+                                    parallel_workers=args.workers)
 
 
 def half_lap_symmetry_differences(control_s_m, controls_m, lap_length_m):
@@ -79,8 +81,10 @@ def timed_optimisation(track, bike, policy, config, initial_controls_m=None):
     result = optimise_planar_racing_line(
         track, bike, policy, config, initial_controls_m=initial_controls_m)
     elapsed = time.perf_counter() - started
+    print(f"workers={config.parallel_workers}")
     print(f"optimisation_elapsed_s={elapsed:.6f}")
     print(f"seconds_per_evaluation={elapsed / result.evaluations:.9f}")
+    print(f"evaluations_per_wall_second={result.evaluations / elapsed:.6f}")
     return result
 
 

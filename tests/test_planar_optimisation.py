@@ -119,3 +119,78 @@ def test_coupled_bump_escapes_coordinate_stationary_objective():
     assert best.lap_time_s < initial.lap_time_s
     assert np.count_nonzero(result) > 1
     assert evaluations > 1 and polls == 1
+
+
+@pytest.mark.parametrize("workers", [0, -1, 1.5, True])
+def test_planar_parallel_worker_count_must_be_a_positive_integer(workers):
+    with pytest.raises(ValueError, match="worker"):
+        PlanarOptimisationConfig(parallel_workers=workers)
+
+
+def test_one_worker_preserves_default_serial_behaviour():
+    track = Track((CircularArc(30, 2 * math.pi),), Pose(0, 0, 0), 5, 3, True)
+    policy = PlanarControlStationPolicy(100, math.pi / 2)
+    common = dict(max_sweeps=1, max_evaluations=30,
+                  boundary_check_spacing_m=1,
+                  optimisation_sample_spacing_m=2)
+    default = optimise_planar_racing_line(
+        track, bike(), policy, PlanarOptimisationConfig(**common))
+    explicit = optimise_planar_racing_line(
+        track, bike(), policy,
+        PlanarOptimisationConfig(**common, parallel_workers=1))
+
+    assert np.array_equal(default.best_controls_m, explicit.best_controls_m)
+    assert default.best_lap_time_s == explicit.best_lap_time_s
+    assert (default.evaluations, default.sweeps, default.final_step_m,
+            default.termination_reason) == (
+                explicit.evaluations, explicit.sweeps, explicit.final_step_m,
+                explicit.termination_reason)
+
+
+def test_spawn_parallel_poll_matches_serial_result_exactly():
+    track = Track((CircularArc(30, 2 * math.pi),), Pose(0, 0, 0), 5, 3, True)
+    policy = PlanarControlStationPolicy(100, math.pi / 2)
+    common = dict(max_sweeps=1, max_evaluations=30,
+                  boundary_check_spacing_m=1,
+                  optimisation_sample_spacing_m=2)
+    serial = optimise_planar_racing_line(
+        track, bike(), policy,
+        PlanarOptimisationConfig(**common, parallel_workers=1))
+    parallel = optimise_planar_racing_line(
+        track, bike(), policy,
+        PlanarOptimisationConfig(**common, parallel_workers=2))
+
+    assert np.array_equal(serial.best_controls_m, parallel.best_controls_m)
+    assert serial.best_lap_time_s == parallel.best_lap_time_s
+    assert (serial.evaluations, serial.sweeps, serial.final_step_m,
+            serial.termination_reason) == (
+                parallel.evaluations, parallel.sweeps, parallel.final_step_m,
+                parallel.termination_reason)
+
+
+def test_out_of_order_poll_completion_retains_candidate_tie_breaking():
+    """A batch may finish backwards, but its returned records retain input order."""
+    def evaluate(controls):
+        return SimpleNamespace(feasible=True, lap_time_s=5.0)
+
+    completion_order = []
+
+    def complete_backwards_in_input_order(candidates):
+        candidates = list(candidates)
+        results = [None] * len(candidates)
+        for index in reversed(range(len(candidates))):
+            completion_order.append(index)
+            results[index] = evaluate(candidates[index])
+        return results
+
+    controls = np.zeros(3)
+    initial = SimpleNamespace(feasible=True, lap_time_s=10.0)
+    config = PlanarOptimisationConfig(max_sweeps=1, max_evaluations=30)
+    result, _, _, polls, _, _ = _best_improvement_pattern_search(
+        controls, np.full(3, -2.0), np.full(3, 2.0), initial, evaluate,
+        config, complete_backwards_in_input_order)
+
+    assert completion_order == sorted(completion_order, reverse=True)
+    assert polls == 1
+    # All candidates tie, so direction 0/sign 0 (+ first coordinate) wins.
+    assert np.array_equal(result, np.array([1.0, 0.0, 0.0]))
