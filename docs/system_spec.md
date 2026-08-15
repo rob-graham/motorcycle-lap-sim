@@ -107,3 +107,11 @@ special cases in boundaries, racing-line geometry, paths, or the fixed-path
 solver. Its analytic curvature discontinuities are intentional, and Phase 8
 racing-line optimisation is explicitly deferred. See
 [the reference-track record](mallala_reference_track.md).
+## Phase 8 direct planar optimisation
+
+The fixed-path solver consumes `SampledPath` and remains unaware of whether
+geometry came from the analytic centreline, Phase 4/5 offset construction, or
+the Phase 8 non-uniform C2-periodic Cartesian spline. Phase 8 physical controls
+are stationed from primitive length and arc heading change, then continuously
+corridor- and forward-progress-validated before sampling. Path-model control
+resolution is distinct from fixed-spline output resolution.
