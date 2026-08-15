@@ -161,3 +161,20 @@ Phase 8 provides an alternative direct Cartesian optimiser with physical
 lateral controls placed from analytic primitive geometry. It preserves Phase 5
 and separates control-policy (path-model) resolution from fixed-spline sampling
 resolution. See [the Phase 8 design](docs/direct_planar_racing_line_optimisation.md).
+
+### Optional Numba fixed-path backend
+
+The existing Python `solve_speed_profile` remains the authoritative reference
+backend. An explicitly imported, optional Numba implementation can be installed
+with `python -m pip install -e ".[accelerated]"` and called as
+`speed_solver.numba_backend.solve_speed_profile_numba`. Its cached numerical
+kernels compile torque interpolation, gear selection, load transfer, combined
+tyre limits, 60-step capability bisections, and cyclic propagation. `fastmath`
+is deliberately disabled and inner Numba parallelism is deliberately not used.
+The Phase 8 optimiser is **not** switched to this backend yet.
+
+Run the fixed, zero-control Mallala comparison and timing diagnostic with:
+
+```bash
+python scripts/r6_numba_speed_solver_check.py --repeats 3
+```
