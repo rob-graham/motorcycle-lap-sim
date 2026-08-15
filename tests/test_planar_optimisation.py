@@ -1,4 +1,5 @@
 import math
+import builtins
 from types import SimpleNamespace
 import numpy as np
 import pytest
@@ -11,6 +12,7 @@ from motorcycle_lap_sim.optimisation import (COARSE_PLANAR_CONTROL_POLICY,
     resample_planar_result)
 from motorcycle_lap_sim.track import CircularArc, Pose, Straight, Track, sample_track_stations
 from motorcycle_lap_sim.optimisation.planar import _best_improvement_pattern_search
+from motorcycle_lap_sim.optimisation.planar import SpeedBackendUnavailableError
 
 
 def bike(): return load_motorcycle_config("examples/motorcycles/test_motorcycle.yaml")
@@ -125,6 +127,85 @@ def test_coupled_bump_escapes_coordinate_stationary_objective():
 def test_planar_parallel_worker_count_must_be_a_positive_integer(workers):
     with pytest.raises(ValueError, match="worker"):
         PlanarOptimisationConfig(parallel_workers=workers)
+
+
+def test_invalid_speed_backend_is_rejected():
+    with pytest.raises(ValueError, match="speed_backend"):
+        PlanarOptimisationConfig(speed_backend="gpu")
+    track = Track((CircularArc(30, 2 * math.pi),), Pose(0, 0, 0), 5, 3, True)
+    stations = generate_planar_control_stations(
+        track, PlanarControlStationPolicy(100, math.pi / 2))
+    with pytest.raises(ValueError, match="speed_backend"):
+        evaluate_planar_racing_line(
+            np.zeros(len(stations)), track, bike(), stations, speed_backend="gpu")
+
+
+def test_missing_numba_is_a_backend_error_not_candidate_infeasibility(monkeypatch):
+    original_import = builtins.__import__
+
+    def unavailable(name, *args, **kwargs):
+        if name == "motorcycle_lap_sim.speed_solver.numba_backend":
+            raise ModuleNotFoundError("simulated missing numba")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", unavailable)
+    track = Track((CircularArc(30, 2 * math.pi),), Pose(0, 0, 0), 5, 3, True)
+    stations = generate_planar_control_stations(
+        track, PlanarControlStationPolicy(100, math.pi / 2))
+    with pytest.raises(SpeedBackendUnavailableError, match="accelerated extra"):
+        evaluate_planar_racing_line(
+            np.zeros(len(stations)), track, bike(), stations, speed_backend="numba")
+
+
+def test_numba_direct_serial_and_restart_match_python():
+    pytest.importorskip("numba")
+    track = Track((CircularArc(30, 2 * math.pi),), Pose(0, 0, 0), 5, 3, True)
+    policy = PlanarControlStationPolicy(100, math.pi / 2)
+    stations = generate_planar_control_stations(track, policy)
+    controls = np.full(len(stations), 0.25)
+    python_evaluation = evaluate_planar_racing_line(
+        controls, track, bike(), stations, sample_spacing_m=2,
+        boundary_check_spacing_m=1, speed_backend="python")
+    numba_evaluation = evaluate_planar_racing_line(
+        controls, track, bike(), stations, sample_spacing_m=2,
+        boundary_check_spacing_m=1, speed_backend="numba")
+    assert python_evaluation.feasible and numba_evaluation.feasible
+    assert abs(python_evaluation.lap_time_s - numba_evaluation.lap_time_s) <= 1e-9
+    assert np.allclose(python_evaluation.speed_profile.speed_mps,
+                       numba_evaluation.speed_profile.speed_mps, rtol=0, atol=1e-9)
+
+    common = dict(max_sweeps=1, max_evaluations=30,
+                  boundary_check_spacing_m=1, optimisation_sample_spacing_m=2)
+    python_result = optimise_planar_racing_line(
+        track, bike(), policy, PlanarOptimisationConfig(**common), controls)
+    numba_result = optimise_planar_racing_line(
+        track, bike(), policy,
+        PlanarOptimisationConfig(**common, speed_backend="numba"), controls)
+    assert np.array_equal(python_result.initial_controls_m, numba_result.initial_controls_m)
+    assert np.array_equal(python_result.best_controls_m, numba_result.best_controls_m)
+    assert abs(python_result.best_lap_time_s - numba_result.best_lap_time_s) <= 1e-9
+    assert (python_result.evaluations, python_result.sweeps,
+            python_result.termination_reason) == (
+                numba_result.evaluations, numba_result.sweeps,
+                numba_result.termination_reason)
+
+
+def test_spawn_numba_poll_matches_serial_numba():
+    pytest.importorskip("numba")
+    track = Track((CircularArc(30, 2 * math.pi),), Pose(0, 0, 0), 5, 3, True)
+    policy = PlanarControlStationPolicy(100, math.pi / 2)
+    common = dict(max_sweeps=1, max_evaluations=30,
+                  boundary_check_spacing_m=1, optimisation_sample_spacing_m=2,
+                  speed_backend="numba")
+    serial = optimise_planar_racing_line(
+        track, bike(), policy, PlanarOptimisationConfig(**common))
+    parallel = optimise_planar_racing_line(
+        track, bike(), policy,
+        PlanarOptimisationConfig(**common, parallel_workers=2))
+    assert np.array_equal(serial.best_controls_m, parallel.best_controls_m)
+    assert serial.best_lap_time_s == parallel.best_lap_time_s
+    assert (serial.evaluations, serial.sweeps, serial.termination_reason) == (
+        parallel.evaluations, parallel.sweeps, parallel.termination_reason)
 
 
 def test_one_worker_preserves_default_serial_behaviour():

@@ -19,6 +19,29 @@ from motorcycle_lap_sim.track import CircularArc, Track, sample_track_stations
 from .results import immutable_array
 
 
+_SPEED_BACKENDS = ("python", "numba")
+
+
+class SpeedBackendUnavailableError(RuntimeError):
+    """Requested optional fixed-path solver backend cannot be loaded."""
+
+
+def _speed_solver(speed_backend: str):
+    """Resolve a fixed-path solver without importing optional Numba eagerly."""
+    if speed_backend == "python":
+        return solve_speed_profile
+    if speed_backend != "numba":
+        raise ValueError(
+            f"speed_backend must be one of {_SPEED_BACKENDS}, got {speed_backend!r}")
+    try:
+        from motorcycle_lap_sim.speed_solver.numba_backend import solve_speed_profile_numba
+    except (ImportError, ModuleNotFoundError) as error:
+        raise SpeedBackendUnavailableError(
+            "Numba speed backend is unavailable; install the accelerated extra with "
+            "python -m pip install -e \".[test,accelerated]\"") from error
+    return solve_speed_profile_numba
+
+
 @dataclass(frozen=True)
 class PlanarControlStationPolicy:
     """Maximum centreline distance and arc heading change between controls."""
@@ -86,6 +109,7 @@ class _PlanarWorkerContext:
     sample_spacing_m: float
     boundary_margin_m: float
     boundary_check_spacing_m: float
+    speed_backend: str
 
 
 _planar_worker_context: _PlanarWorkerContext | None = None
@@ -93,12 +117,15 @@ _planar_worker_context: _PlanarWorkerContext | None = None
 
 def _initialise_planar_worker(track: Track, motorcycle, control_s_m: NDArray[np.float64],
                               sample_spacing_m: float, boundary_margin_m: float,
-                              boundary_check_spacing_m: float) -> None:
+                              boundary_check_spacing_m: float, speed_backend: str) -> None:
     """Install evaluation data in a spawned worker instead of sending it per task."""
     global _planar_worker_context
     _planar_worker_context = _PlanarWorkerContext(
         track, motorcycle, control_s_m, sample_spacing_m, boundary_margin_m,
-        boundary_check_spacing_m)
+        boundary_check_spacing_m, speed_backend)
+    # Resolve once per spawned worker. Numba's on-disk cache supplies compiled
+    # kernels; compilation/loading happens at process level, never in threads.
+    _speed_solver(speed_backend)
 
 
 def _evaluate_planar_worker(controls_m: NDArray[np.float64]) -> PlanarObjectiveEvaluation:
@@ -110,21 +137,26 @@ def _evaluate_planar_worker(controls_m: NDArray[np.float64]) -> PlanarObjectiveE
         controls_m, context.track, context.motorcycle, context.control_s_m,
         sample_spacing_m=context.sample_spacing_m,
         boundary_margin_m=context.boundary_margin_m,
-        boundary_check_spacing_m=context.boundary_check_spacing_m)
+        boundary_check_spacing_m=context.boundary_check_spacing_m,
+        speed_backend=context.speed_backend)
 
 
 def evaluate_planar_racing_line(controls_m: ArrayLike, track: Track, motorcycle,
                                 control_s_m: ArrayLike, *, sample_spacing_m: float = 1.0,
                                 boundary_margin_m: float = 0.25,
-                                boundary_check_spacing_m: float = 0.25
+                                boundary_check_spacing_m: float = 0.25,
+                                speed_backend: str = "python"
                                 ) -> PlanarObjectiveEvaluation:
     """Evaluate a direct planar candidate; known geometric invalidity is infeasible."""
+    # Backend configuration failures are deliberately outside candidate
+    # infeasibility handling: a missing optional dependency is not geometry.
+    speed_solver = _speed_solver(speed_backend)
     try:
         smooth = build_smooth_racing_line_path(
             track, controls_m, guide_s_m=control_s_m,
             sample_spacing_m=sample_spacing_m, boundary_margin_m=boundary_margin_m,
             boundary_check_spacing_m=boundary_check_spacing_m)
-        speed = solve_speed_profile(smooth.sampled_path, motorcycle)
+        speed = speed_solver(smooth.sampled_path, motorcycle)
     except (ValueError, RuntimeError, FloatingPointError) as error:
         return PlanarObjectiveEvaluation(False, math.inf,
                                          failure_reason=f"{type(error).__name__}: {error}")
@@ -143,6 +175,7 @@ class PlanarOptimisationConfig:
     boundary_check_spacing_m: float = 0.25
     optimisation_sample_spacing_m: float = 1.0
     parallel_workers: int = 1
+    speed_backend: str = "python"
 
     def __post_init__(self) -> None:
         positive = (self.initial_step_m, self.minimum_step_m,
@@ -160,6 +193,8 @@ class PlanarOptimisationConfig:
                for value in (self.max_sweeps, self.max_evaluations,
                               self.parallel_workers)):
             raise ValueError("sweep, evaluation, and worker limits must be positive integers")
+        if self.speed_backend not in _SPEED_BACKENDS:
+            raise ValueError(f"speed_backend must be one of {_SPEED_BACKENDS}")
 
 
 @dataclass(frozen=True)
@@ -309,7 +344,8 @@ def optimise_planar_racing_line(track: Track, motorcycle,
     initial_controls = controls.copy()
     kwargs = dict(sample_spacing_m=config.optimisation_sample_spacing_m,
                   boundary_margin_m=config.boundary_margin_m,
-                  boundary_check_spacing_m=config.boundary_check_spacing_m)
+                  boundary_check_spacing_m=config.boundary_check_spacing_m,
+                  speed_backend=config.speed_backend)
     initial = evaluate_planar_racing_line(controls, track, motorcycle, control_s, **kwargs)
     if not initial.feasible:
         raise ValueError(f"initial planar candidate is infeasible: {initial.failure_reason}")
@@ -329,14 +365,28 @@ def optimise_planar_racing_line(track: Track, motorcycle,
                 initargs=(track, motorcycle, control_s,
                           config.optimisation_sample_spacing_m,
                           config.boundary_margin_m,
-                          config.boundary_check_spacing_m)) as executor:
+                          config.boundary_check_spacing_m,
+                          config.speed_backend)) as executor:
             controls, best, evaluations, sweeps, step, reason = (
                 _best_improvement_pattern_search(
                     controls, lower, upper, initial, evaluate, config,
                     lambda candidates: executor.map(
                         _evaluate_planar_worker, candidates)))
-    improvement = initial.lap_time_s - best.lap_time_s
     assert best.smooth_line is not None and best.speed_profile is not None
+    if config.speed_backend == "numba":
+        # Validate only the accepted result, on the identical saved smooth path.
+        reference_speed = solve_speed_profile(best.smooth_line.sampled_path, motorcycle)
+        lap_difference = abs(reference_speed.lap_time_s - best.lap_time_s)
+        speed_difference = float(np.max(np.abs(
+            reference_speed.speed_mps - best.speed_profile.speed_mps)))
+        if lap_difference > 1e-9 or speed_difference > 1e-9:
+            raise RuntimeError(
+                "Numba final-result Python reference validation failed: "
+                f"lap difference={lap_difference:.12g} s, "
+                f"maximum speed difference={speed_difference:.12g} m/s")
+        best = PlanarObjectiveEvaluation(
+            True, reference_speed.lap_time_s, best.smooth_line, reference_speed)
+    improvement = initial.lap_time_s - best.lap_time_s
     return PlanarOptimisationResult(control_s, initial_controls, controls, lower, upper,
         initial.lap_time_s, best.lap_time_s, improvement, 100 * improvement / initial.lap_time_s,
         best.smooth_line, best.smooth_line.sampled_path, best.speed_profile, evaluations, sweeps,

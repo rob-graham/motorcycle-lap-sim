@@ -71,6 +71,38 @@ original direction/sign order before the existing lap-time and order tie-break
 is applied. Polls remain all-or-nothing with respect to the evaluation budget,
 and the single pattern move retains its existing evaluation count and semantics.
 
+## Optional fixed-path speed backend
+
+`PlanarOptimisationConfig.speed_backend` explicitly selects `"python"` or
+`"numba"`. Python remains the default and authoritative reference, so existing
+callers and installations are unchanged. Install the optional backend with:
+
+```text
+python -m pip install -e ".[test,accelerated]"
+```
+
+Numba is imported lazily only when selected. If it is unavailable, optimisation
+fails immediately with an installation hint rather than classifying candidates
+as infeasible. `--speed-backend numba --workers 1` runs serially without a
+process pool. Larger worker counts retain the persistent spawned process pool;
+each worker resolves the cached Numba backend once during initialization.
+Windows and other platforms therefore use process-level parallelism, not Numba
+threads (`parallel=True` is not used). The final accepted Numba path is solved
+once by the Python reference backend, and lap time and every speed sample must
+agree within `1e-9` before the Python result becomes the reported profile.
+
+The focused Mallala/reference, one-sweep throughput comparison is:
+
+```text
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 1 --max-evaluations 400 --workers 1 --speed-backend python
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 1 --max-evaluations 400 --workers 1 --speed-backend numba
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 1 --max-evaluations 400 --workers 8 --speed-backend numba
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 1 --max-evaluations 400 --workers 16 --speed-backend numba
+```
+
+The diagnostic reports elapsed time, seconds per evaluation, and evaluations
+per wall-clock second. These measurements are diagnostics, never test gates.
+
 ## Restarting from exported controls
 
 The Phase 8 diagnostic can start one track and one control policy from the best
