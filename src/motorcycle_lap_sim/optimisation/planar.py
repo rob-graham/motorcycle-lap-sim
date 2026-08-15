@@ -6,6 +6,7 @@ module deliberately does not use the Phase 5 dense offset parameterisation.
 
 from dataclasses import dataclass
 import math
+from typing import Callable
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -147,6 +148,88 @@ class PlanarOptimisationResult:
             object.__setattr__(self, name, immutable_array(getattr(self, name)))
 
 
+def _periodic_search_directions(control_count: int) -> tuple[NDArray[np.float64], ...]:
+    """Return deterministic unit-peak coordinate and smooth periodic directions."""
+    directions: list[NDArray[np.float64]] = []
+    for centre in range(control_count):
+        coordinate = np.zeros(control_count)
+        coordinate[centre] = 1.0
+        directions.append(coordinate)
+    for weights in ((0.5, 1.0, 0.5), (0.25, 0.5, 1.0, 0.5, 0.25)):
+        radius = len(weights) // 2
+        for centre in range(control_count):
+            bump = np.zeros(control_count)
+            # Addition, rather than assignment, also defines small periodic
+            # control sets where a kernel wraps onto the same control twice.
+            for offset, weight in enumerate(weights, start=-radius):
+                bump[(centre + offset) % control_count] += weight
+            bump /= np.max(bump)
+            directions.append(bump)
+    return tuple(directions)
+
+
+def _best_improvement_pattern_search(
+        initial_controls: NDArray[np.float64], lower: NDArray[np.float64],
+        upper: NDArray[np.float64], initial_evaluation, evaluate: Callable,
+        config: PlanarOptimisationConfig):
+    """Poll all coordinate/coupled moves and accept only the best candidate.
+
+    Direction and sign order provide deterministic tie-breaking.  A single
+    same-direction pattern move is tried after each successful full poll.
+    """
+    controls = initial_controls.copy()
+    best = initial_evaluation
+    evaluations, polls, step = 1, 0, config.initial_step_m
+    reason = "maximum sweeps reached"
+    directions = _periodic_search_directions(len(controls))
+    while polls < config.max_sweeps:
+        if evaluations >= config.max_evaluations:
+            reason = "maximum evaluations reached"
+            break
+        candidate_controls = []
+        for direction_order, direction in enumerate(directions):
+            for sign_order, sign in enumerate((1.0, -1.0)):
+                candidate = np.clip(controls + sign * step * direction, lower, upper)
+                if np.array_equal(candidate, controls):
+                    continue
+                candidate_controls.append(
+                    (direction_order, sign_order, candidate, sign * direction))
+        # Do not evaluate or choose a search-order-dependent prefix of a poll.
+        if evaluations + len(candidate_controls) > config.max_evaluations:
+            reason = "maximum evaluations reached"
+            break
+        candidates = []
+        for direction_order, sign_order, candidate, signed_direction in candidate_controls:
+            evaluation = evaluate(candidate)
+            evaluations += 1
+            candidates.append((evaluation.lap_time_s, direction_order, sign_order,
+                               candidate, evaluation, signed_direction))
+        polls += 1
+        improving = [item for item in candidates if item[4].feasible and
+                     item[0] < best.lap_time_s - config.lap_time_improvement_tolerance_s]
+        if improving:
+            _, _, _, controls, best, accepted_direction = min(
+                improving, key=lambda item: (item[0], item[1], item[2]))
+            # A deliberately modest pattern move: clipping is component-wise,
+            # and a fully clipped/no-change move consumes no evaluation.
+            pattern = np.clip(controls + step * accepted_direction, lower, upper)
+            if not np.array_equal(pattern, controls) and evaluations < config.max_evaluations:
+                pattern_evaluation = evaluate(pattern)
+                evaluations += 1
+                if (pattern_evaluation.feasible and pattern_evaluation.lap_time_s
+                        < best.lap_time_s - config.lap_time_improvement_tolerance_s):
+                    controls, best = pattern, pattern_evaluation
+        else:
+            step *= config.step_reduction
+            if step < config.minimum_step_m:
+                reason = "minimum step reached"
+                break
+        if evaluations >= config.max_evaluations:
+            reason = "maximum evaluations reached"
+            break
+    return controls, best, evaluations, polls, step, reason
+
+
 def optimise_planar_racing_line(track: Track, motorcycle,
                                 policy: PlanarControlStationPolicy = REFERENCE_PLANAR_CONTROL_POLICY,
                                 config: PlanarOptimisationConfig = PlanarOptimisationConfig(),
@@ -178,44 +261,11 @@ def optimise_planar_racing_line(track: Track, motorcycle,
     initial = evaluate_planar_racing_line(controls, track, motorcycle, control_s, **kwargs)
     if not initial.feasible:
         raise ValueError(f"initial planar candidate is infeasible: {initial.failure_reason}")
-    best = initial
-    evaluations, sweeps, step = 1, 0, config.initial_step_m
-    reason = "maximum sweeps reached"
-    while sweeps < config.max_sweeps:
-        if evaluations >= config.max_evaluations:
-            reason = "maximum evaluations reached"
-            break
-        accepted = False
-        for index in range(len(controls)):
-            candidates = []
-            for order, direction in enumerate((1.0, -1.0)):
-                candidate = controls.copy()
-                candidate[index] = np.clip(candidate[index] + direction * step,
-                                           lower[index], upper[index])
-                if candidate[index] == controls[index]:
-                    continue
-                if evaluations >= config.max_evaluations:
-                    break
-                evaluation = evaluate_planar_racing_line(candidate, track, motorcycle,
-                                                         control_s, **kwargs)
-                evaluations += 1
-                candidates.append((evaluation.lap_time_s, order, candidate, evaluation))
-            if candidates:
-                _, _, candidate, evaluation = min(candidates, key=lambda item: (item[0], item[1]))
-                if (evaluation.feasible and evaluation.lap_time_s
-                        < best.lap_time_s - config.lap_time_improvement_tolerance_s):
-                    controls, best, accepted = candidate, evaluation, True
-            if evaluations >= config.max_evaluations:
-                reason = "maximum evaluations reached"
-                break
-        sweeps += 1
-        if evaluations >= config.max_evaluations:
-            break
-        if not accepted:
-            step *= config.step_reduction
-            if step < config.minimum_step_m:
-                reason = "minimum step reached"
-                break
+    def evaluate(candidate):
+        return evaluate_planar_racing_line(candidate, track, motorcycle, control_s, **kwargs)
+
+    controls, best, evaluations, sweeps, step, reason = _best_improvement_pattern_search(
+        controls, lower, upper, initial, evaluate, config)
     improvement = initial.lap_time_s - best.lap_time_s
     assert best.smooth_line is not None and best.speed_profile is not None
     return PlanarOptimisationResult(control_s, initial_controls, controls, lower, upper,

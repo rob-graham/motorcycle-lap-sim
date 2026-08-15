@@ -4,6 +4,7 @@ import argparse
 import csv
 import math
 from pathlib import Path
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -72,7 +73,18 @@ def half_lap_symmetry_differences(control_s_m, controls_m, lap_length_m):
     return controls[:half] - controls[half:]
 
 
-def report_oval_symmetry(track, bike, result, config):
+def timed_optimisation(track, bike, policy, config, initial_controls_m=None):
+    """Run and report wall-clock timing without affecting optimisation logic."""
+    started = time.perf_counter()
+    result = optimise_planar_racing_line(
+        track, bike, policy, config, initial_controls_m=initial_controls_m)
+    elapsed = time.perf_counter() - started
+    print(f"optimisation_elapsed_s={elapsed:.6f}")
+    print(f"seconds_per_evaluation={elapsed / result.evaluations:.9f}")
+    return result
+
+
+def report_oval_symmetry(track, bike, policy, result, config):
     """Evaluate half-lap transforms of the fine-policy oval result."""
     differences = half_lap_symmetry_differences(
         result.control_s_m, result.best_controls_m, track.total_length_m)
@@ -101,14 +113,47 @@ def report_oval_symmetry(track, bike, result, config):
     print(f"original_best_lap_s={result.best_lap_time_s:.9f}")
     print(f"shifted_best_lap_s={shifted_lap:.9f}")
     print(f"shifted_minus_original_s={delta:.12f}")
-    if not evaluations["shifted"].feasible or not math.isclose(
-            shifted_lap, result.best_lap_time_s, rel_tol=0.0, abs_tol=1e-9):
-        print("OVAL OBJECTIVE SYMMETRY FAILURE")
+    resolution_deltas = []
+    for spacing in (1.0, 0.5, 0.25):
+        original_at_spacing = evaluate_planar_racing_line(
+            original, track, bike, result.control_s_m, sample_spacing_m=spacing,
+            boundary_margin_m=config.boundary_margin_m,
+            boundary_check_spacing_m=config.boundary_check_spacing_m)
+        shifted_at_spacing = evaluate_planar_racing_line(
+            candidates["shifted"], track, bike, result.control_s_m, sample_spacing_m=spacing,
+            boundary_margin_m=config.boundary_margin_m,
+            boundary_check_spacing_m=config.boundary_check_spacing_m)
+        spacing_delta = shifted_at_spacing.lap_time_s - original_at_spacing.lap_time_s
+        resolution_deltas.append(spacing_delta)
+        print(f"shift_symmetry_spacing_m={spacing:.2f} "
+              f"shifted_minus_original_s={spacing_delta:.12f}")
+    if (all(math.isfinite(value) for value in resolution_deltas)
+            and abs(resolution_deltas[-1]) < 0.5 * abs(resolution_deltas[0])):
+        print("shift_symmetry_assessment=numerical sampling-phase sensitivity")
+    elif not math.isclose(resolution_deltas[-1], 0.0, rel_tol=0.0, abs_tol=1e-9):
+        print("shift_symmetry_assessment=objective symmetry unresolved")
     for name in ("symmetric_a", "symmetric_b", "symmetric_c"):
         print(f"{name}_lap_s={evaluations[name].lap_time_s:.9f}")
     if any(evaluations[name].lap_time_s < result.best_lap_time_s
            for name in ("symmetric_a", "symmetric_b", "symmetric_c")):
         print("CURRENT COORDINATE-SEARCH RESULT IS NOT LOCALLY CONVINCING")
+    reference_lap_s = 15.525622213
+    quality = "reaches_or_improves" if result.best_lap_time_s <= reference_lap_s else "slower"
+    print(f"symmetric_a_reference_quality={quality} reference_lap_s={reference_lap_s:.9f}")
+
+    symmetric_a = candidates["symmetric_a"]
+    restart = timed_optimisation(track, bike, policy, config, symmetric_a)
+    restart_differences = half_lap_symmetry_differences(
+        restart.control_s_m, restart.best_controls_m, track.total_length_m)
+    print(f"symmetric_a_restart_initial_lap_s={restart.initial_lap_time_s:.9f}")
+    print(f"symmetric_a_restart_final_lap_s={restart.best_lap_time_s:.9f}")
+    print(f"symmetric_a_restart_symmetry_max_control_difference_m="
+          f"{np.max(np.abs(restart_differences)):.9f}")
+    print(f"symmetric_a_restart_symmetry_rms_control_difference_m="
+          f"{np.sqrt(np.mean(restart_differences ** 2)):.9f}")
+    print(f"symmetric_a_restart_evaluations={restart.evaluations} "
+          f"polls={restart.sweeps} termination={restart.termination_reason!r}")
+    print(f"symmetric_a_restart_controls_m={restart.best_controls_m.tolist()}")
 
 
 def selected_tracks(selection):
@@ -228,6 +273,7 @@ def report_extra_fine(track, bike, centre_lap_s):
 
 
 def main():
+    total_started = time.perf_counter()
     args = build_parser().parse_args()
     bike = load_motorcycle_config("examples/motorcycles/r6_2017plus_reference.yaml")
     config = optimisation_config(args)
@@ -250,10 +296,10 @@ def main():
                   f"clearance_m={smooth.minimum_boundary_clearance_m:.9f}")
             # Preserve the complete diagnostic, while a targeted policy explicitly optimises that policy.
             if args.policy != "all" or name == "oval" or policy_name == "reference":
-                result = optimise_planar_racing_line(track, bike, policy, config)
+                result = timed_optimisation(track, bike, policy, config)
                 metrics(policy_name, result)
                 if name == "oval" and policy_name == "fine":
-                    report_oval_symmetry(track, bike, result, config)
+                    report_oval_symmetry(track, bike, policy, result, config)
                 saved[policy_name] = (smooth, result)
 
         report_extra_fine(track, bike, centre.lap_time_s)
@@ -285,6 +331,9 @@ def main():
 
     print("\nControl-policy comparisons are different path-model orders; fixed-spline comparisons are output resolution only.")
     print("A fastest policy is not automatically most accurate; material changes mean path-model sensitivity NOT CONVERGED.")
+    total_elapsed = time.perf_counter() - total_started
+    print(f"total_elapsed_s={total_elapsed:.6f}")
+    print(f"total_elapsed_min={total_elapsed / 60.0:.6f}")
 
 
 if __name__ == "__main__":
