@@ -110,12 +110,14 @@ physical controls in an earlier `phase8_*_controls.csv` export. For example
 (shown as a Windows-compatible single line):
 
 ```text
-python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 100 --max-evaluations 12000 --workers 16 --initial-controls-csv phase8_mallala_controls.csv
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 100 --max-evaluations 12000 --workers 16 --initial-step-m 0.25 --initial-controls-csv phase8_mallala_controls.csv
 ```
 
 This is a strict same-track, same-policy restart. The saved station layout and
 bounds must match those generated with the current boundary margin; controls
-are never reordered, interpolated, projected, or clipped. The restart restores
-only the physical control vector. Evaluation count, sweep count, current search
-step size, and process-pool state all begin fresh from the current
-`PlanarOptimisationConfig`.
+are never reordered, interpolated, projected, or clipped. Controls and the
+search step are separate pieces of restart state: the CSV restores only the
+physical control vector, while `--initial-step-m` explicitly restores a known
+search step (and defaults to `1.0` m when omitted). Evaluation count, sweep
+count, and process-pool state begin fresh from the current
+`PlanarOptimisationConfig`. The restart CSV format is unchanged.

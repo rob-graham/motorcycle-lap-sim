@@ -59,6 +59,7 @@ def build_parser():
     parser.add_argument("--max-sweeps", type=int, default=30)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--speed-backend", choices=("python", "numba"), default="python")
+    parser.add_argument("--initial-step-m", type=float, default=1.0)
     parser.add_argument("--track", choices=("oval", "mallala", "both"), default="both")
     parser.add_argument("--policy", choices=("coarse", "reference", "fine", "all"),
                         default="all")
@@ -68,7 +69,8 @@ def build_parser():
 
 def optimisation_config(args):
     """Build the Phase 8 configuration from diagnostic CLI limits."""
-    return PlanarOptimisationConfig(max_sweeps=args.max_sweeps,
+    return PlanarOptimisationConfig(initial_step_m=args.initial_step_m,
+                                    max_sweeps=args.max_sweeps,
                                     max_evaluations=args.max_evaluations,
                                     parallel_workers=args.workers,
                                     speed_backend=args.speed_backend)
