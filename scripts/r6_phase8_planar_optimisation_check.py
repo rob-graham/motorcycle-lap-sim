@@ -41,10 +41,74 @@ TRACKS = (
 def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-evaluations", type=int, default=1500)
+    parser.add_argument("--max-sweeps", type=int, default=30)
     parser.add_argument("--track", choices=("oval", "mallala", "both"), default="both")
     parser.add_argument("--policy", choices=("coarse", "reference", "fine", "all"),
                         default="all")
     return parser
+
+
+def optimisation_config(args):
+    """Build the Phase 8 configuration from diagnostic CLI limits."""
+    return PlanarOptimisationConfig(max_sweeps=args.max_sweeps,
+                                    max_evaluations=args.max_evaluations)
+
+
+def half_lap_symmetry_differences(control_s_m, controls_m, lap_length_m):
+    """Return paired control differences when stations repeat after half a lap.
+
+    The absolute station tolerance only accommodates floating-point arithmetic
+    used to accumulate otherwise identical primitive subdivisions.
+    """
+    stations = np.asarray(control_s_m, dtype=float)
+    controls = np.asarray(controls_m, dtype=float)
+    if (stations.ndim != 1 or controls.shape != stations.shape
+            or len(stations) == 0 or len(stations) % 2):
+        return None
+    half = len(stations) // 2
+    if not np.allclose(stations[half:] - 0.5 * lap_length_m, stations[:half],
+                       rtol=0.0, atol=1e-10):
+        return None
+    return controls[:half] - controls[half:]
+
+
+def report_oval_symmetry(track, bike, result, config):
+    """Evaluate half-lap transforms of the fine-policy oval result."""
+    differences = half_lap_symmetry_differences(
+        result.control_s_m, result.best_controls_m, track.total_length_m)
+    if differences is None:
+        return
+    print(f"symmetry_max_control_difference_m={np.max(np.abs(differences)):.9f}")
+    print(f"symmetry_rms_control_difference_m={np.sqrt(np.mean(differences ** 2)):.9f}")
+
+    half = len(result.best_controls_m) // 2
+    original = result.best_controls_m
+    candidates = {
+        "shifted": np.roll(original, half),
+        "symmetric_a": np.tile(original[:half], 2),
+        "symmetric_b": np.tile(original[half:], 2),
+        "symmetric_c": np.tile(0.5 * (original[:half] + original[half:]), 2),
+    }
+    kwargs = dict(sample_spacing_m=config.optimisation_sample_spacing_m,
+                  boundary_margin_m=config.boundary_margin_m,
+                  boundary_check_spacing_m=config.boundary_check_spacing_m)
+    evaluations = {
+        name: evaluate_planar_racing_line(controls, track, bike, result.control_s_m, **kwargs)
+        for name, controls in candidates.items()
+    }
+    shifted_lap = evaluations["shifted"].lap_time_s
+    delta = shifted_lap - result.best_lap_time_s
+    print(f"original_best_lap_s={result.best_lap_time_s:.9f}")
+    print(f"shifted_best_lap_s={shifted_lap:.9f}")
+    print(f"shifted_minus_original_s={delta:.12f}")
+    if not evaluations["shifted"].feasible or not math.isclose(
+            shifted_lap, result.best_lap_time_s, rel_tol=0.0, abs_tol=1e-9):
+        print("OVAL OBJECTIVE SYMMETRY FAILURE")
+    for name in ("symmetric_a", "symmetric_b", "symmetric_c"):
+        print(f"{name}_lap_s={evaluations[name].lap_time_s:.9f}")
+    if any(evaluations[name].lap_time_s < result.best_lap_time_s
+           for name in ("symmetric_a", "symmetric_b", "symmetric_c")):
+        print("CURRENT COORDINATE-SEARCH RESULT IS NOT LOCALLY CONVINCING")
 
 
 def selected_tracks(selection):
@@ -166,7 +230,7 @@ def report_extra_fine(track, bike, centre_lap_s):
 def main():
     args = build_parser().parse_args()
     bike = load_motorcycle_config("examples/motorcycles/r6_2017plus_reference.yaml")
-    config = PlanarOptimisationConfig(max_evaluations=args.max_evaluations)
+    config = optimisation_config(args)
     for name, filename in selected_tracks(args.track):
         track = Track.from_yaml(filename)
         centre = solve_speed_profile(from_sampled_track(sample_track(track, 1.0)), bike)
@@ -188,6 +252,8 @@ def main():
             if args.policy != "all" or name == "oval" or policy_name == "reference":
                 result = optimise_planar_racing_line(track, bike, policy, config)
                 metrics(policy_name, result)
+                if name == "oval" and policy_name == "fine":
+                    report_oval_symmetry(track, bike, result, config)
                 saved[policy_name] = (smooth, result)
 
         report_extra_fine(track, bike, centre.lap_time_s)

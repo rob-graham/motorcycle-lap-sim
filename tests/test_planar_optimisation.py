@@ -79,3 +79,21 @@ def test_invalid_planar_candidate_is_deterministic_infeasibility():
     second=evaluate_planar_racing_line(np.full(len(stations),20.),track,bike(),stations)
     assert not first.feasible and first.lap_time_s == math.inf
     assert first.failure_reason == second.failure_reason
+
+
+def test_planar_pattern_search_accepts_bounded_initial_controls():
+    track=Track((CircularArc(30,2*math.pi),),Pose(0,0,0),5,3,True)
+    policy=PlanarControlStationPolicy(100,math.pi/2)
+    stations=generate_planar_control_stations(track,policy)
+    initial=np.full(len(stations),.25)
+    config=PlanarOptimisationConfig(max_sweeps=1,max_evaluations=10,
+                                    boundary_check_spacing_m=1,
+                                    optimisation_sample_spacing_m=2)
+    result=optimise_planar_racing_line(track,bike(),policy,config,initial)
+    assert np.array_equal(result.initial_controls_m,initial)
+    with pytest.raises(ValueError,match="one value per"):
+        optimise_planar_racing_line(track,bike(),policy,config,initial[:-1])
+    with pytest.raises(ValueError,match="finite"):
+        optimise_planar_racing_line(track,bike(),policy,config,np.full(len(stations),np.nan))
+    with pytest.raises(ValueError,match="local bounds"):
+        optimise_planar_racing_line(track,bike(),policy,config,np.full(len(stations),99.))

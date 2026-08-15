@@ -149,17 +149,35 @@ class PlanarOptimisationResult:
 
 def optimise_planar_racing_line(track: Track, motorcycle,
                                 policy: PlanarControlStationPolicy = REFERENCE_PLANAR_CONTROL_POLICY,
-                                config: PlanarOptimisationConfig = PlanarOptimisationConfig()
+                                config: PlanarOptimisationConfig = PlanarOptimisationConfig(),
+                                initial_controls_m: ArrayLike | None = None,
                                 ) -> PlanarOptimisationResult:
+    """Optimise physical controls, optionally resuming from a supplied candidate.
+
+    The default initial candidate remains the centreline (all zero controls).
+    Supplied controls must be finite, have one value per generated station, and
+    lie inside the local usable-track bounds.
+    """
     control_s = generate_planar_control_stations(track, policy)
     lower, upper = planar_control_bounds(track, control_s, config.boundary_margin_m)
-    controls = np.zeros(len(control_s))
+    if initial_controls_m is None:
+        controls = np.zeros(len(control_s))
+    else:
+        controls = np.asarray(initial_controls_m, dtype=float)
+        if controls.shape != (len(control_s),):
+            raise ValueError("initial controls must have one value per control station")
+        if not np.all(np.isfinite(controls)):
+            raise ValueError("initial controls must be finite")
+        if np.any(controls < lower) or np.any(controls > upper):
+            raise ValueError("initial controls must lie within their local bounds")
+        controls = controls.copy()
+    initial_controls = controls.copy()
     kwargs = dict(sample_spacing_m=config.optimisation_sample_spacing_m,
                   boundary_margin_m=config.boundary_margin_m,
                   boundary_check_spacing_m=config.boundary_check_spacing_m)
     initial = evaluate_planar_racing_line(controls, track, motorcycle, control_s, **kwargs)
     if not initial.feasible:
-        raise ValueError(f"zero-control planar baseline is infeasible: {initial.failure_reason}")
+        raise ValueError(f"initial planar candidate is infeasible: {initial.failure_reason}")
     best = initial
     evaluations, sweeps, step = 1, 0, config.initial_step_m
     reason = "maximum sweeps reached"
@@ -200,7 +218,7 @@ def optimise_planar_racing_line(track: Track, motorcycle,
                 break
     improvement = initial.lap_time_s - best.lap_time_s
     assert best.smooth_line is not None and best.speed_profile is not None
-    return PlanarOptimisationResult(control_s, np.zeros(len(control_s)), controls, lower, upper,
+    return PlanarOptimisationResult(control_s, initial_controls, controls, lower, upper,
         initial.lap_time_s, best.lap_time_s, improvement, 100 * improvement / initial.lap_time_s,
         best.smooth_line, best.smooth_line.sampled_path, best.speed_profile, evaluations, sweeps,
         step, reason, best.smooth_line.minimum_boundary_clearance_m,
