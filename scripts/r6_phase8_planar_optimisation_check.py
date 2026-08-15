@@ -19,6 +19,7 @@ from motorcycle_lap_sim.optimisation import (
     evaluate_planar_racing_line,
     generate_planar_control_stations,
     optimise_planar_racing_line,
+    planar_control_bounds,
     resample_planar_result,
 )
 from motorcycle_lap_sim.path import from_sampled_track
@@ -39,14 +40,28 @@ TRACKS = (
 )
 
 
+class RestartArgumentParser(argparse.ArgumentParser):
+    """Reject a restart CSV before the diagnostic performs any track work."""
+
+    def parse_args(self, args=None, namespace=None):
+        parsed = super().parse_args(args, namespace)
+        if parsed.initial_controls_csv is not None:
+            if parsed.track == "both":
+                self.error("--initial-controls-csv requires --track oval or mallala, not both")
+            if parsed.policy == "all":
+                self.error("--initial-controls-csv requires --policy coarse, reference, or fine, not all")
+        return parsed
+
+
 def build_parser():
-    parser = argparse.ArgumentParser()
+    parser = RestartArgumentParser()
     parser.add_argument("--max-evaluations", type=int, default=1500)
     parser.add_argument("--max-sweeps", type=int, default=30)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--track", choices=("oval", "mallala", "both"), default="both")
     parser.add_argument("--policy", choices=("coarse", "reference", "fine", "all"),
                         default="all")
+    parser.add_argument("--initial-controls-csv", type=Path, default=None)
     return parser
 
 
@@ -86,6 +101,63 @@ def timed_optimisation(track, bike, policy, config, initial_controls_m=None):
     print(f"seconds_per_evaluation={elapsed / result.evaluations:.9f}")
     print(f"evaluations_per_wall_second={result.evaluations / elapsed:.6f}")
     return result
+
+
+def load_initial_controls_csv(path, control_s_m, lower_bounds_m, upper_bounds_m):
+    """Load controls from an export, requiring an exact current layout identity."""
+    required = ("index", "control_s_m", "best_offset_m", "lower_bound_m", "upper_bound_m")
+    path = Path(path)
+    try:
+        with path.open(newline="", encoding="utf-8") as stream:
+            reader = csv.DictReader(stream)
+            missing = [field for field in required if field not in (reader.fieldnames or ())]
+            if missing:
+                raise ValueError(f"initial controls CSV is missing required columns: {', '.join(missing)}")
+            rows = list(reader)
+    except OSError as exc:
+        raise ValueError(f"initial controls CSV {path} cannot be read: {exc}") from exc
+
+    stations = np.asarray(control_s_m, dtype=float)
+    lower = np.asarray(lower_bounds_m, dtype=float)
+    upper = np.asarray(upper_bounds_m, dtype=float)
+    expected_count = len(stations)
+    if len(rows) != expected_count:
+        raise ValueError(f"initial controls CSV row count {len(rows)} does not match "
+                         f"generated control-station count {expected_count}")
+
+    parsed = np.empty((expected_count, 4), dtype=float)
+    for expected_index, row in enumerate(rows):
+        try:
+            index = int(row["index"])
+            if str(index) != row["index"].strip():
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"initial controls CSV row {expected_index + 2} has an invalid index") from exc
+        if index != expected_index:
+            raise ValueError(f"initial controls CSV index {index} at row {expected_index + 2} "
+                             f"does not match expected sequential index {expected_index}")
+        try:
+            parsed[expected_index] = [float(row[field]) for field in required[1:]]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"initial controls CSV row {expected_index + 2} contains "
+                             "a non-numeric value") from exc
+        if not np.all(np.isfinite(parsed[expected_index])):
+            raise ValueError(f"initial controls CSV row {expected_index + 2} contains "
+                             "a non-finite numeric value")
+
+    saved_stations, controls, saved_lower, saved_upper = parsed.T
+    tolerance = dict(rtol=0.0, atol=1e-9)
+    if not np.allclose(saved_stations, stations, **tolerance):
+        raise ValueError("initial controls CSV control_s_m does not match generated control stations")
+    if not np.allclose(saved_lower, lower, **tolerance):
+        raise ValueError("initial controls CSV lower_bound_m does not match current control bounds")
+    if not np.allclose(saved_upper, upper, **tolerance):
+        raise ValueError("initial controls CSV upper_bound_m does not match current control bounds")
+    outside = (controls < lower) | (controls > upper)
+    if np.any(outside):
+        index = int(np.flatnonzero(outside)[0])
+        raise ValueError(f"initial controls CSV best_offset_m at index {index} is outside current bounds")
+    return controls
 
 
 def report_oval_symmetry(track, bike, policy, result, config):
@@ -170,10 +242,11 @@ def selected_policies(selection):
     return POLICIES if selection == "all" else tuple(item for item in POLICIES if item[0] == selection)
 
 
-def metrics(label, result):
+def metrics(label, result, restarted=False):
     path = result.sampled_path
     speed = result.speed_profile
-    print(f"{label}: controls={len(result.control_s_m)} zero_lap_s={result.initial_lap_time_s:.9f} "
+    initial_label = "initial_lap_s" if restarted else "zero_lap_s"
+    print(f"{label}: controls={len(result.control_s_m)} {initial_label}={result.initial_lap_time_s:.9f} "
           f"optimised_lap_s={result.best_lap_time_s:.9f} improvement_s={result.improvement_s:.9f} "
           f"evaluations={result.evaluations} sweeps={result.sweeps} length_m={path.total_length_m:.9f} "
           f"clearance_m={result.minimum_boundary_clearance_m:.9f} forward_min={result.minimum_forward_progress:.9f} "
@@ -182,6 +255,25 @@ def metrics(label, result):
           f"max_abs_dk_dt={np.max(np.abs(speed.curvature_rate_1pmps)):.9f} "
           f"controls_minmax_m={np.min(result.best_controls_m):.6f}/{np.max(result.best_controls_m):.6f} "
           f"termination={result.termination_reason!r}")
+
+
+def run_selected_optimisation(parser, args, track, bike, policy_name, policy,
+                              config, stations):
+    """Load an optional restart vector, then run and report one optimisation."""
+    initial_controls = None
+    if args.initial_controls_csv is not None:
+        lower, upper = planar_control_bounds(track, stations, config.boundary_margin_m)
+        try:
+            initial_controls = load_initial_controls_csv(
+                args.initial_controls_csv, stations, lower, upper)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"initial_controls_csv={args.initial_controls_csv}")
+        print(f"initial_controls_count={len(initial_controls)}")
+    result = timed_optimisation(
+        track, bike, policy, config, initial_controls_m=initial_controls)
+    metrics(policy_name, result, restarted=initial_controls is not None)
+    return result
 
 
 def continuous_clearance_data(track, smooth_line, boundary_margin_m):
@@ -276,9 +368,10 @@ def report_extra_fine(track, bike, centre_lap_s):
           f"clearance_m={smooth.minimum_boundary_clearance_m:.9f}")
 
 
-def main():
+def main(argv=None):
     total_started = time.perf_counter()
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args(argv)
     bike = load_motorcycle_config("examples/motorcycles/r6_2017plus_reference.yaml")
     config = optimisation_config(args)
     for name, filename in selected_tracks(args.track):
@@ -300,8 +393,8 @@ def main():
                   f"clearance_m={smooth.minimum_boundary_clearance_m:.9f}")
             # Preserve the complete diagnostic, while a targeted policy explicitly optimises that policy.
             if args.policy != "all" or name == "oval" or policy_name == "reference":
-                result = timed_optimisation(track, bike, policy, config)
-                metrics(policy_name, result)
+                result = run_selected_optimisation(
+                    parser, args, track, bike, policy_name, policy, config, stations)
                 if name == "oval" and policy_name == "fine":
                     report_oval_symmetry(track, bike, policy, result, config)
                 saved[policy_name] = (smooth, result)
