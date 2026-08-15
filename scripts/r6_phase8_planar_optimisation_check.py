@@ -23,6 +23,7 @@ from motorcycle_lap_sim.optimisation import (
     resample_planar_result,
 )
 from motorcycle_lap_sim.path import from_sampled_track
+from motorcycle_lap_sim.racing_line import build_smooth_racing_line_path
 from motorcycle_lap_sim.speed_solver import solve_speed_profile
 from motorcycle_lap_sim.track import Track, sample_track, sample_track_stations
 from motorcycle_lap_sim.track.boundaries import calculate_boundaries
@@ -34,6 +35,7 @@ POLICIES = (
 )
 # This is deliberately local to the diagnostic: it is not a Phase 8 default.
 EXTRA_FINE_POLICY = PlanarControlStationPolicy(50.0, math.radians(20.0))
+NAMED_POLICIES = POLICIES + (("extra-fine", EXTRA_FINE_POLICY),)
 TRACKS = (
     ("oval", "examples/tracks/test_oval.yaml"),
     ("mallala", "examples/tracks/mallala_reference.yaml"),
@@ -41,15 +43,26 @@ TRACKS = (
 
 
 class RestartArgumentParser(argparse.ArgumentParser):
-    """Reject a restart CSV before the diagnostic performs any track work."""
+    """Reject ambiguous initial-control modes before doing any track work."""
 
     def parse_args(self, args=None, namespace=None):
         parsed = super().parse_args(args, namespace)
+        if parsed.initial_controls_csv is not None and parsed.project_initial_controls_csv is not None:
+            self.error("--initial-controls-csv and --project-initial-controls-csv are mutually exclusive")
         if parsed.initial_controls_csv is not None:
             if parsed.track == "both":
                 self.error("--initial-controls-csv requires --track oval or mallala, not both")
             if parsed.policy == "all":
                 self.error("--initial-controls-csv requires --policy coarse, reference, or fine, not all")
+        if parsed.project_initial_controls_csv is not None:
+            if parsed.track == "both":
+                self.error("--project-initial-controls-csv requires one explicit --track, not both")
+            if parsed.policy == "all":
+                self.error("--project-initial-controls-csv requires one explicit target --policy, not all")
+            if parsed.project_source_policy is None:
+                self.error("--project-source-policy is required with --project-initial-controls-csv")
+        elif parsed.project_source_policy is not None:
+            self.error("--project-source-policy requires --project-initial-controls-csv")
         return parsed
 
 
@@ -61,9 +74,12 @@ def build_parser():
     parser.add_argument("--speed-backend", choices=("python", "numba"), default="python")
     parser.add_argument("--initial-step-m", type=float, default=1.0)
     parser.add_argument("--track", choices=("oval", "mallala", "both"), default="both")
-    parser.add_argument("--policy", choices=("coarse", "reference", "fine", "all"),
+    parser.add_argument("--policy", choices=("coarse", "reference", "fine", "extra-fine", "all"),
                         default="all")
     parser.add_argument("--initial-controls-csv", type=Path, default=None)
+    parser.add_argument("--project-initial-controls-csv", type=Path, default=None)
+    parser.add_argument("--project-source-policy",
+                        choices=("coarse", "reference", "fine", "extra-fine"), default=None)
     return parser
 
 
@@ -247,7 +263,68 @@ def selected_tracks(selection):
 
 def selected_policies(selection):
     """Return named optimisation policies selected by the command line."""
-    return POLICIES if selection == "all" else tuple(item for item in POLICIES if item[0] == selection)
+    # ``all`` intentionally retains the original three-policy diagnostic.
+    return POLICIES if selection == "all" else tuple(
+        item for item in NAMED_POLICIES if item[0] == selection)
+
+
+def project_initial_controls(track, source_policy, target_policy, source_csv,
+                             boundary_margin_m, sample_spacing_m=1.0,
+                             boundary_check_spacing_m=0.25):
+    """Project a source policy's Cartesian spline onto target track normals.
+
+    The source CSV is strictly checked against its own generated layout.  The
+    returned values are physical normal projections, never interpolated source
+    controls and never clipped to target bounds.
+    """
+    source_s = generate_planar_control_stations(track, source_policy)
+    source_lower, source_upper = planar_control_bounds(
+        track, source_s, boundary_margin_m)
+    source_controls = load_initial_controls_csv(
+        source_csv, source_s, source_lower, source_upper)
+    try:
+        source_line = build_smooth_racing_line_path(
+            track, source_controls, guide_s_m=source_s,
+            sample_spacing_m=sample_spacing_m,
+            boundary_margin_m=boundary_margin_m,
+            boundary_check_spacing_m=boundary_check_spacing_m)
+    except (ValueError, RuntimeError, FloatingPointError) as exc:
+        raise ValueError(f"projected source smooth path is infeasible: {exc}") from exc
+
+    target_s = generate_planar_control_stations(track, target_policy)
+    target_track = sample_track_stations(track, target_s)
+    source_x, source_y, *_ = source_line.spline.evaluate(target_s)
+    projected = ((source_x - target_track.x_m) * target_track.normal_x
+                 + (source_y - target_track.y_m) * target_track.normal_y)
+    if not np.all(np.isfinite(projected)):
+        index = int(np.flatnonzero(~np.isfinite(projected))[0])
+        raise ValueError(f"projected target control is non-finite at index {index}, "
+                         f"station {target_s[index]:.9g} m")
+    target_lower, target_upper = planar_control_bounds(
+        track, target_s, boundary_margin_m)
+    outside = (projected < target_lower) | (projected > target_upper)
+    if np.any(outside):
+        index = int(np.flatnonzero(outside)[0])
+        bound_name = "lower" if projected[index] < target_lower[index] else "upper"
+        bound = target_lower[index] if bound_name == "lower" else target_upper[index]
+        raise ValueError(
+            f"projected target control at index {index}, station {target_s[index]:.9g} m, "
+            f"value {projected[index]:.9g} m violates {bound_name} bound {bound:.9g} m")
+    try:
+        target_line = build_smooth_racing_line_path(
+            track, projected, guide_s_m=target_s,
+            sample_spacing_m=sample_spacing_m,
+            boundary_margin_m=boundary_margin_m,
+            boundary_check_spacing_m=boundary_check_spacing_m)
+    except (ValueError, RuntimeError, FloatingPointError) as exc:
+        raise ValueError(f"projected target smooth path is infeasible: {exc}") from exc
+
+    dense_s = target_line.evaluated_track_s_m
+    source_dense_x, source_dense_y, *_ = source_line.spline.evaluate(dense_s)
+    target_dense_x, target_dense_y, *_ = target_line.spline.evaluate(dense_s)
+    max_difference = float(np.max(np.hypot(
+        source_dense_x - target_dense_x, source_dense_y - target_dense_y)))
+    return projected, source_s, target_s, target_line, max_difference
 
 
 def metrics(label, result, restarted=False):
@@ -278,6 +355,31 @@ def run_selected_optimisation(parser, args, track, bike, policy_name, policy,
             parser.error(str(exc))
         print(f"initial_controls_csv={args.initial_controls_csv}")
         print(f"initial_controls_count={len(initial_controls)}")
+    elif args.project_initial_controls_csv is not None:
+        source_policy = dict(NAMED_POLICIES)[args.project_source_policy]
+        try:
+            (initial_controls, source_stations, projected_stations,
+             projected_line, transfer_difference) = project_initial_controls(
+                track, source_policy, policy, args.project_initial_controls_csv,
+                config.boundary_margin_m, config.optimisation_sample_spacing_m,
+                config.boundary_check_spacing_m)
+        except ValueError as exc:
+            parser.error(str(exc))
+        # Assert the caller supplied the same exact target layout used during
+        # projection, rather than allowing a subtly different optimiser input.
+        if not np.array_equal(projected_stations, np.asarray(stations)):
+            raise RuntimeError("projected target control layout differs from optimiser layout")
+        print(f"projected_initial_controls_csv={args.project_initial_controls_csv}")
+        print(f"projected_source_policy={args.project_source_policy}")
+        print(f"projected_target_policy={policy_name}")
+        print(f"projected_source_controls={len(source_stations)}")
+        print(f"projected_target_controls={len(projected_stations)}")
+        print(f"projected_offset_min_m={np.min(initial_controls):.9f}")
+        print(f"projected_offset_max_m={np.max(initial_controls):.9f}")
+        print(f"projected_minimum_boundary_clearance_m="
+              f"{projected_line.minimum_boundary_clearance_m:.9f}")
+        print(f"projected_minimum_forward_progress={projected_line.minimum_forward_progress:.9f}")
+        print(f"projected_geometry_transfer_max_position_difference_m={transfer_difference:.9f}")
     result = timed_optimisation(
         track, bike, policy, config, initial_controls_m=initial_controls)
     metrics(policy_name, result, restarted=initial_controls is not None)
