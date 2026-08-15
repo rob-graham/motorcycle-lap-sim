@@ -18,8 +18,6 @@ optimisation_config = SCRIPT["optimisation_config"]
 load_initial_controls_csv = SCRIPT["load_initial_controls_csv"]
 run_selected_optimisation = SCRIPT["run_selected_optimisation"]
 metrics = SCRIPT["metrics"]
-project_initial_controls = SCRIPT["project_initial_controls"]
-snap_projected_control_roundoff = SCRIPT["snap_projected_control_roundoff"]
 EXTRA_FINE_POLICY = SCRIPT["EXTRA_FINE_POLICY"]
 SCRIPT_GLOBALS = run_selected_optimisation.__globals__
 
@@ -51,55 +49,24 @@ def test_targeted_cli_selection():
 
 def test_extra_fine_is_explicit_policy_with_expected_parameters():
     args = build_parser().parse_args(("--track", "mallala", "--policy", "extra-fine"))
+
     assert [name for name, _ in selected_policies(args.policy)] == ["extra-fine"]
     assert EXTRA_FINE_POLICY.max_spacing_m == 50.0
     assert EXTRA_FINE_POLICY.max_arc_heading_change_rad == pytest.approx(math.radians(20.0))
+
+
+def test_mallala_extra_fine_has_96_controls():
+    track = SCRIPT["Track"].from_yaml("examples/tracks/mallala_reference.yaml")
+
+    stations = SCRIPT["generate_planar_control_stations"](track, EXTRA_FINE_POLICY)
+
+    assert len(stations) == 96
 
 
 def test_parser_accepts_initial_controls_csv():
     args = build_parser().parse_args(("--track", "mallala", "--policy", "reference",
                                       "--initial-controls-csv", "saved.csv"))
     assert args.initial_controls_csv == Path("saved.csv")
-
-
-def test_projection_cli_options_are_explicit():
-    args = build_parser().parse_args((
-        "--track", "mallala", "--policy", "extra-fine",
-        "--project-source-policy", "reference",
-        "--project-initial-controls-csv", "saved.csv"))
-    assert args.project_initial_controls_csv == Path("saved.csv")
-    assert args.project_source_policy == "reference"
-
-
-def test_projection_and_restart_are_mutually_exclusive(capsys):
-    with pytest.raises(SystemExit):
-        build_parser().parse_args((
-            "--track", "mallala", "--policy", "fine",
-            "--initial-controls-csv", "restart.csv",
-            "--project-initial-controls-csv", "source.csv",
-            "--project-source-policy", "coarse"))
-    assert "mutually exclusive" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("option,value,message", [
-    ("--track", "both", "one explicit --track"),
-    ("--policy", "all", "one explicit target --policy"),
-])
-def test_projection_rejects_ambiguous_target(option, value, message, capsys):
-    arguments = ["--track", "oval", "--policy", "fine", option, value,
-                 "--project-initial-controls-csv", "saved.csv",
-                 "--project-source-policy", "coarse"]
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(arguments)
-    assert message in capsys.readouterr().err
-
-
-def test_projection_requires_source_policy(capsys):
-    with pytest.raises(SystemExit):
-        build_parser().parse_args((
-            "--track", "oval", "--policy", "fine",
-            "--project-initial-controls-csv", "saved.csv"))
-    assert "--project-source-policy is required" in capsys.readouterr().err
 
 
 def test_initial_step_cli_is_passed_to_optimisation_config():
@@ -151,125 +118,16 @@ def test_invalid_controls_csv_is_rejected(tmp_path, change, message):
         load_initial_controls_csv(path, [0.0, 10.0], [-2.0, -2.0], [2.0, 2.0])
 
 
-def test_projection_validates_source_layout_and_uses_spline_normal_projection(tmp_path):
-    track = SCRIPT["Track"].from_yaml("examples/tracks/test_oval.yaml")
-    source_policy = SCRIPT["FINE_PLANAR_CONTROL_POLICY"]
-    target_policy = EXTRA_FINE_POLICY
-    source_s = SCRIPT["generate_planar_control_stations"](track, source_policy)
-    source_lower, source_upper = SCRIPT["planar_control_bounds"](track, source_s, 0.25)
-    source_controls = np.zeros(len(source_s))
-    path = tmp_path / "source.csv"
-    write_controls(path, source_s, source_controls, source_lower, source_upper,
-                   np.arange(len(source_s)))
-
-    (projected, loaded_source_s, target_s, target_line, _, snap_count,
-     snap_max_m) = project_initial_controls(track, source_policy, target_policy, path, 0.25)
-    source_line = SCRIPT["build_smooth_racing_line_path"](
-        track, source_controls, guide_s_m=source_s, sample_spacing_m=1.0,
-        boundary_margin_m=0.25, boundary_check_spacing_m=0.25)
-    exact_track = SCRIPT["sample_track_stations"](track, target_s)
-    x, y, *_ = source_line.spline.evaluate(target_s)
-    expected = ((x - exact_track.x_m) * exact_track.normal_x
-                + (y - exact_track.y_m) * exact_track.normal_y)
-    assert np.array_equal(loaded_source_s, source_s)
-    assert np.allclose(projected, expected, rtol=0.0, atol=1e-13)
-    # Interpolating the constant source controls would return exactly zero.
-    assert np.max(np.abs(projected)) > 1e-6
-    lower, upper = SCRIPT["planar_control_bounds"](track, target_s, 0.25)
-    assert np.all(projected >= lower) and np.all(projected <= upper)
-    assert target_line.minimum_boundary_clearance_m >= -1e-10
-    assert target_line.minimum_forward_progress > 0.0
-    assert snap_count == 0
-    assert snap_max_m == 0.0
-
-    wrong_layout = tmp_path / "wrong.csv"
-    target_lower, target_upper = SCRIPT["planar_control_bounds"](track, target_s, 0.25)
-    write_controls(wrong_layout, target_s, np.ones(len(target_s)), target_lower,
-                   target_upper, np.arange(len(target_s)))
-    with pytest.raises(ValueError, match="row count"):
-        project_initial_controls(track, source_policy, target_policy, wrong_layout, 0.25)
-
-
-def test_out_of_bounds_projection_fails_without_clipping(monkeypatch, tmp_path):
-    path = tmp_path / "source.csv"
-    write_controls(path, stations=(0., 1., 2., 3.), controls=(0.,) * 4,
-                   lower=(-1.,) * 4, upper=(1.,) * 4, indices=range(4))
-    fake_track = SimpleNamespace()
-    monkeypatch.setitem(SCRIPT_GLOBALS, "generate_planar_control_stations",
-                        lambda track, policy: np.array([0., 1., 2., 3.]))
-    monkeypatch.setitem(SCRIPT_GLOBALS, "planar_control_bounds",
-                        lambda track, stations, margin: (np.full(4, -1.), np.full(4, 1.)))
-    sampled = SimpleNamespace(x_m=np.zeros(4), y_m=np.zeros(4),
-                              normal_x=np.ones(4), normal_y=np.zeros(4))
-    monkeypatch.setitem(SCRIPT_GLOBALS, "sample_track_stations", lambda *args: sampled)
-    spline = SimpleNamespace(evaluate=lambda stations: (
-        np.full(4, 2.), np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4), np.zeros(4)))
-    monkeypatch.setitem(SCRIPT_GLOBALS, "build_smooth_racing_line_path",
-                        lambda *args, **kwargs: SimpleNamespace(spline=spline))
-
-    with pytest.raises(ValueError, match=r"index 0.*station 0.*value 2.*upper bound 1"):
-        project_initial_controls(fake_track, object(), object(), path, 0.0)
-
-
-def test_projection_roundoff_snaps_bounds_exactly_and_preserves_in_bound_values():
-    lower = np.full(4, -3.75)
-    upper = np.full(4, 3.75)
-    values = np.array([-3.7500000000000075, 3.7500000000000075, -1.25, 2.5])
-
-    repaired, count, maximum = snap_projected_control_roundoff(values, lower, upper)
-
-    assert repaired[0] == lower[0]
-    assert repaired[1] == upper[1]
-    assert np.array_equal(repaired[2:], values[2:])
-    assert count == 2
-    assert maximum == pytest.approx(7.549516567451064e-15)
-
-
-def test_material_projection_excess_is_not_repaired():
-    values = np.array([-3.750000000001])
-    repaired, count, maximum = snap_projected_control_roundoff(
-        values, np.array([-3.75]), np.array([3.75]))
-
-    assert np.array_equal(repaired, values)
-    assert count == 0
-    assert maximum == 0.0
-
-
-def test_projection_mode_reports_boundary_snap_diagnostics(monkeypatch, capsys):
-    args = build_parser().parse_args((
-        "--track", "oval", "--policy", "fine",
-        "--project-initial-controls-csv", "source.csv",
-        "--project-source-policy", "coarse"))
-    stations = np.array([0.0])
-    projected_line = SimpleNamespace(
-        minimum_boundary_clearance_m=0.0, minimum_forward_progress=1.0)
-    monkeypatch.setitem(SCRIPT_GLOBALS, "project_initial_controls", lambda *args: (
-        np.array([-3.75]), np.array([0.0]), stations, projected_line, 0.0,
-        1, 7.549516567451064e-15))
-    monkeypatch.setitem(SCRIPT_GLOBALS, "timed_optimisation", lambda *args, **kwargs: object())
-    monkeypatch.setitem(SCRIPT_GLOBALS, "metrics", lambda *args, **kwargs: None)
-
-    run_selected_optimisation(
-        object(), args, object(), object(), "fine", object(),
-        SimpleNamespace(boundary_margin_m=0.25,
-                        optimisation_sample_spacing_m=1.0,
-                        boundary_check_spacing_m=0.25),
-        stations)
-
-    output = capsys.readouterr().out
-    assert "projected_boundary_snap_count=1" in output
-    assert "projected_boundary_snap_max_m=7.5495165674510645e-15" in output
-
-
-def test_no_restart_preserves_zero_start_and_metric_wording(monkeypatch):
-    args = build_parser().parse_args(("--track", "oval", "--policy", "fine"))
+@pytest.mark.parametrize("policy_name", ["fine", "extra-fine"])
+def test_no_restart_preserves_zero_start_and_metric_wording(monkeypatch, policy_name):
+    args = build_parser().parse_args(("--track", "oval", "--policy", policy_name))
     seen = {}
     monkeypatch.setitem(SCRIPT_GLOBALS, "timed_optimisation",
                         lambda *args, initial_controls_m=None: seen.setdefault(
                             "initial", initial_controls_m) or object())
     monkeypatch.setitem(SCRIPT_GLOBALS, "metrics",
                         lambda label, result, restarted=False: seen.setdefault("restarted", restarted))
-    result = run_selected_optimisation(object(), args, object(), object(), "fine",
+    result = run_selected_optimisation(object(), args, object(), object(), policy_name,
                                        object(), SimpleNamespace(boundary_margin_m=0.25), [0.0])
     assert result is not None
     assert seen == {"initial": None, "restarted": False}
