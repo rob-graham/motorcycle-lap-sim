@@ -1,6 +1,7 @@
 """Lightweight tests for the Phase 8 diagnostic command-line selection helpers."""
 
 from pathlib import Path
+import math
 import runpy
 from types import SimpleNamespace
 
@@ -17,6 +18,7 @@ optimisation_config = SCRIPT["optimisation_config"]
 load_initial_controls_csv = SCRIPT["load_initial_controls_csv"]
 run_selected_optimisation = SCRIPT["run_selected_optimisation"]
 metrics = SCRIPT["metrics"]
+EXTRA_FINE_POLICY = SCRIPT["EXTRA_FINE_POLICY"]
 SCRIPT_GLOBALS = run_selected_optimisation.__globals__
 
 
@@ -43,6 +45,22 @@ def test_targeted_cli_selection():
     assert optimisation_config(args).initial_step_m == 1.0
     assert [name for name, _ in selected_tracks(args.track)] == ["oval"]
     assert [name for name, _ in selected_policies(args.policy)] == ["fine"]
+
+
+def test_extra_fine_is_explicit_policy_with_expected_parameters():
+    args = build_parser().parse_args(("--track", "mallala", "--policy", "extra-fine"))
+
+    assert [name for name, _ in selected_policies(args.policy)] == ["extra-fine"]
+    assert EXTRA_FINE_POLICY.max_spacing_m == 50.0
+    assert EXTRA_FINE_POLICY.max_arc_heading_change_rad == pytest.approx(math.radians(20.0))
+
+
+def test_mallala_extra_fine_has_96_controls():
+    track = SCRIPT["Track"].from_yaml("examples/tracks/mallala_reference.yaml")
+
+    stations = SCRIPT["generate_planar_control_stations"](track, EXTRA_FINE_POLICY)
+
+    assert len(stations) == 96
 
 
 def test_parser_accepts_initial_controls_csv():
@@ -100,15 +118,16 @@ def test_invalid_controls_csv_is_rejected(tmp_path, change, message):
         load_initial_controls_csv(path, [0.0, 10.0], [-2.0, -2.0], [2.0, 2.0])
 
 
-def test_no_restart_preserves_zero_start_and_metric_wording(monkeypatch):
-    args = build_parser().parse_args(("--track", "oval", "--policy", "fine"))
+@pytest.mark.parametrize("policy_name", ["fine", "extra-fine"])
+def test_no_restart_preserves_zero_start_and_metric_wording(monkeypatch, policy_name):
+    args = build_parser().parse_args(("--track", "oval", "--policy", policy_name))
     seen = {}
     monkeypatch.setitem(SCRIPT_GLOBALS, "timed_optimisation",
                         lambda *args, initial_controls_m=None: seen.setdefault(
                             "initial", initial_controls_m) or object())
     monkeypatch.setitem(SCRIPT_GLOBALS, "metrics",
                         lambda label, result, restarted=False: seen.setdefault("restarted", restarted))
-    result = run_selected_optimisation(object(), args, object(), object(), "fine",
+    result = run_selected_optimisation(object(), args, object(), object(), policy_name,
                                        object(), SimpleNamespace(boundary_margin_m=0.25), [0.0])
     assert result is not None
     assert seen == {"initial": None, "restarted": False}

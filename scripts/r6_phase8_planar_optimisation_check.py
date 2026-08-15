@@ -34,6 +34,7 @@ POLICIES = (
 )
 # This is deliberately local to the diagnostic: it is not a Phase 8 default.
 EXTRA_FINE_POLICY = PlanarControlStationPolicy(50.0, math.radians(20.0))
+NAMED_POLICIES = POLICIES + (("extra-fine", EXTRA_FINE_POLICY),)
 TRACKS = (
     ("oval", "examples/tracks/test_oval.yaml"),
     ("mallala", "examples/tracks/mallala_reference.yaml"),
@@ -61,7 +62,7 @@ def build_parser():
     parser.add_argument("--speed-backend", choices=("python", "numba"), default="python")
     parser.add_argument("--initial-step-m", type=float, default=1.0)
     parser.add_argument("--track", choices=("oval", "mallala", "both"), default="both")
-    parser.add_argument("--policy", choices=("coarse", "reference", "fine", "all"),
+    parser.add_argument("--policy", choices=("coarse", "reference", "fine", "extra-fine", "all"),
                         default="all")
     parser.add_argument("--initial-controls-csv", type=Path, default=None)
     return parser
@@ -247,7 +248,9 @@ def selected_tracks(selection):
 
 def selected_policies(selection):
     """Return named optimisation policies selected by the command line."""
-    return POLICIES if selection == "all" else tuple(item for item in POLICIES if item[0] == selection)
+    # ``all`` intentionally retains the original three-policy diagnostic.
+    return POLICIES if selection == "all" else tuple(
+        item for item in NAMED_POLICIES if item[0] == selection)
 
 
 def metrics(label, result, restarted=False):
