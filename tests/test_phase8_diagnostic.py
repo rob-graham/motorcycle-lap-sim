@@ -16,7 +16,8 @@ optimisation_config = SCRIPT["optimisation_config"]
 
 def test_targeted_cli_selection():
     args = build_parser().parse_args(("--track", "oval", "--policy", "fine",
-                                      "--max-evaluations", "25", "--max-sweeps", "100"))
+                                      "--max-evaluations", "25", "--max-sweeps", "100",
+                                      "--workers", "2"))
 
     assert args.track == "oval"
     assert args.policy == "fine"
@@ -24,6 +25,7 @@ def test_targeted_cli_selection():
     assert args.max_sweeps == 100
     assert optimisation_config(args).max_sweeps == 100
     assert optimisation_config(args).max_evaluations == 25
+    assert optimisation_config(args).parallel_workers == 2
     assert [name for name, _ in selected_tracks(args.track)] == ["oval"]
     assert [name for name, _ in selected_policies(args.policy)] == ["fine"]
 
@@ -35,6 +37,7 @@ def test_complete_diagnostic_is_default():
     assert [name for name, _ in selected_policies(args.policy)] == [
         "coarse", "reference", "fine",
     ]
+    assert args.workers == 1
 
 
 def test_half_lap_symmetry_differences_require_repeated_even_station_layout():

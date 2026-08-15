@@ -54,3 +54,19 @@ more physically accurate. Material policy dependence is reported as
 unconverged path-model sensitivity rather than tuned away. The model adds no
 clothoids, centreline smoothing, roll dynamics, banking, elevation, kerbs,
 calibration changes, or curvature-rate limit.
+
+## Parallel poll evaluation
+
+`PlanarOptimisationConfig.parallel_workers` optionally evaluates the independent
+candidates in a complete best-improvement poll with a persistent process pool.
+It defaults to `1`, which retains the original serial execution path and creates
+no worker processes. Values greater than one use multiprocessing's `spawn`
+context so the same module-level, picklable worker design is exercised on every
+platform, including Windows. Immutable track, motorcycle, station, and sampling
+context is installed once per worker; individual tasks contain only a control
+vector.
+
+Parallelism changes wall-clock scheduling only. Results are collected in the
+original direction/sign order before the existing lap-time and order tie-break
+is applied. Polls remain all-or-nothing with respect to the evaluation budget,
+and the single pattern move retains its existing evaluation count and semantics.
