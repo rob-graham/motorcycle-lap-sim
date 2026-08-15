@@ -65,3 +65,23 @@ def test_exact_track_stations_and_speed_solver_interoperate():
     profile=solve_speed_profile(result.sampled_path,load_motorcycle_config('examples/motorcycles/test_motorcycle.yaml'))
     assert profile.converged and profile.lap_time_s>0 and np.all(np.isfinite(profile.speed_mps))
     assert np.all(np.isfinite(profile.curvature_gradient_1pm2))
+
+def test_nonuniform_guides_interpolate_and_are_c2_periodic():
+    stations=np.array([0.,.4,1.7,2.2,4.8,5.5])
+    x=np.cos(stations); y=.7*np.sin(stations)
+    spline=PeriodicPlanarSpline(stations,x,y,2*math.pi)
+    evaluated=spline.evaluate(stations)
+    assert np.allclose(evaluated[0],x,atol=1e-13) and np.allclose(evaluated[1],y,atol=1e-13)
+    for knot in np.r_[stations,2*math.pi]:
+        left=spline.evaluate(knot-1e-8); right=spline.evaluate(knot+1e-8)
+        assert all(np.allclose(left[i],right[i],atol=2e-6) for i in range(6))
+    assert np.all(np.isfinite(spline.sampled_path(.1).curvature_1pm))
+
+def test_explicit_uniform_stations_preserve_implicit_uniform_result():
+    track=Track.from_yaml('examples/tracks/test_oval.yaml'); offsets=np.zeros(16)
+    stations=np.arange(16)*track.total_length_m/16
+    implicit=build_smooth_racing_line_path(track,offsets,sample_spacing_m=1)
+    explicit=build_smooth_racing_line_path(track,offsets,guide_s_m=stations,sample_spacing_m=1)
+    assert np.array_equal(implicit.sampled_path.x_m,explicit.sampled_path.x_m)
+    assert np.array_equal(implicit.sampled_path.curvature_1pm,explicit.sampled_path.curvature_1pm)
+    assert implicit.minimum_forward_progress > 0

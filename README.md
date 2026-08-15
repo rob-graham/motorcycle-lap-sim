@@ -155,3 +155,9 @@ Run `python scripts/r6_mallala_reference_check.py` for the 2.0/1.0/0.5 m R6
 centreline resolution diagnostic and equal-scale boundary plot. See the
 [Mallala provenance, assumptions, and limitations](docs/mallala_reference_track.md).
 No racing-line optimisation is performed for Mallala in this phase.
+## Phase 8 direct planar racing-line optimisation
+
+Phase 8 provides an alternative direct Cartesian optimiser with physical
+lateral controls placed from analytic primitive geometry. It preserves Phase 5
+and separates control-policy (path-model) resolution from fixed-spline sampling
+resolution. See [the Phase 8 design](docs/direct_planar_racing_line_optimisation.md).

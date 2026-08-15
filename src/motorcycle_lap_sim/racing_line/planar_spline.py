@@ -21,7 +21,7 @@ def _immutable(values: ArrayLike) -> FloatArray:
 
 @dataclass(frozen=True)
 class PeriodicPlanarSpline:
-    """Uniform periodic interpolating cubic parameterised by centreline ``s``.
+    """Periodic interpolating cubic parameterised by centreline ``s``.
 
     The knot second derivatives solve the cyclic system
     ``M[i-1] + 4 M[i] + M[i+1] = 6/h**2 (G[i+1]-2G[i]+G[i-1])``.
@@ -40,20 +40,25 @@ class PeriodicPlanarSpline:
             raise ValueError("periodic spline requires at least four equal one-dimensional guide arrays")
         if not math.isfinite(self.period_m) or self.period_m <= 0 or not all(np.all(np.isfinite(v)) for v in (s, x, y)):
             raise ValueError("period and guide points must be finite and period must be positive")
-        h = self.period_m / len(s)
-        if not np.allclose(s, np.arange(len(s)) * h, rtol=0.0, atol=1e-10 * max(1.0, self.period_m)):
-            raise ValueError("guide stations must be unique, uniform, begin at zero, and omit the periodic endpoint")
-        matrix = np.eye(len(s)) * 4.0
+        if np.any(s < 0) or np.any(s >= self.period_m) or np.any(np.diff(s) <= 0):
+            raise ValueError("guide stations must be unique, strictly increasing, within [0, period), and omit the endpoint")
+        h = np.r_[np.diff(s), self.period_m - s[-1] + s[0]]
+        if np.any(h <= 0):
+            raise ValueError("cyclic guide intervals must be positive")
+        matrix = np.zeros((len(s), len(s)))
         indices = np.arange(len(s))
-        matrix[indices, (indices - 1) % len(s)] = 1.0
-        matrix[indices, (indices + 1) % len(s)] = 1.0
+        previous_h = np.roll(h, 1)
+        matrix[indices, indices] = 2.0 * (previous_h + h)
+        matrix[indices, (indices - 1) % len(s)] = previous_h
+        matrix[indices, (indices + 1) % len(s)] = h
         points = np.column_stack((x, y))
-        rhs = 6.0 / h**2 * (np.roll(points, -1, axis=0) - 2 * points + np.roll(points, 1, axis=0))
+        rhs = 6.0 * ((np.roll(points, -1, axis=0) - points) / h[:, None]
+                     - (points - np.roll(points, 1, axis=0)) / previous_h[:, None])
         second = np.linalg.solve(matrix, rhs)
         for name, value in (("guide_s_m", s), ("guide_x_m", x), ("guide_y_m", y),
                             ("_points", points), ("_second", second)):
             object.__setattr__(self, name, _immutable(value))
-        object.__setattr__(self, "_h_m", h)
+        object.__setattr__(self, "_interval_m", _immutable(h))
 
     def evaluate(self, s_m: ArrayLike) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray, FloatArray, FloatArray]:
         """Return x, y and their first and second analytic derivatives."""
@@ -61,13 +66,17 @@ class PeriodicPlanarSpline:
         if not np.all(np.isfinite(s)):
             raise ValueError("spline evaluation stations must be finite")
         wrapped = np.mod(s, self.period_m)
-        i = np.floor(wrapped / self._h_m).astype(int)
-        u = (wrapped - i * self._h_m) / self._h_m
+        i = np.searchsorted(self.guide_s_m, wrapped, side="right") - 1
+        i = np.where(i < 0, len(self.guide_s_m) - 1, i)
+        left = self.guide_s_m[i]
+        coordinate = np.where(wrapped < left, wrapped + self.period_m, wrapped)
+        interval = self._interval_m[i]
+        u = (coordinate - left) / interval
         j = (i + 1) % len(self.guide_s_m)
         a, b = 1.0 - u, u
         p0, p1, m0, m1 = self._points[i], self._points[j], self._second[i], self._second[j]
-        point = a[..., None] * p0 + b[..., None] * p1 + self._h_m**2 / 6 * (((a**3-a)[..., None])*m0 + ((b**3-b)[..., None])*m1)
-        first = (p1-p0) / self._h_m + self._h_m / 6 * (((1-3*a**2)[..., None])*m0 + ((3*b**2-1)[..., None])*m1)
+        point = a[..., None] * p0 + b[..., None] * p1 + interval[..., None]**2 / 6 * (((a**3-a)[..., None])*m0 + ((b**3-b)[..., None])*m1)
+        first = (p1-p0) / interval[..., None] + interval[..., None] / 6 * (((1-3*a**2)[..., None])*m0 + ((3*b**2-1)[..., None])*m1)
         second = a[..., None] * m0 + b[..., None] * m1
         return point[..., 0], point[..., 1], first[..., 0], first[..., 1], second[..., 0], second[..., 1]
 
@@ -75,7 +84,8 @@ class PeriodicPlanarSpline:
         total = 0.0
         cursor = start
         while cursor < end - 1e-14:
-            boundary = min(end, (math.floor(cursor / self._h_m + 1e-12) + 1) * self._h_m)
+            following = self.guide_s_m[self.guide_s_m > cursor + 1e-12]
+            boundary = min(end, float(following[0]) if len(following) else self.period_m)
             if boundary <= cursor:
                 boundary = end
             mid, half = (cursor + boundary) / 2, (boundary - cursor) / 2
@@ -117,6 +127,7 @@ class SmoothRacingLineResult:
     projected_offset_m: FloatArray
     tangent_deviation_m: FloatArray
     minimum_boundary_clearance_m: float
+    minimum_forward_progress: float
 
     def __post_init__(self) -> None:
         for name in ("guide_s_m", "guide_offset_m", "guide_x_m", "guide_y_m",
@@ -127,7 +138,8 @@ class SmoothRacingLineResult:
 def build_smooth_racing_line_path(track: Track, guide_offsets_m: ArrayLike, *,
                                   sample_spacing_m: float,
                                   boundary_margin_m: float = 0.0,
-                                  boundary_check_spacing_m: float = 0.25) -> SmoothRacingLineResult:
+                                  boundary_check_spacing_m: float = 0.25,
+                                  guide_s_m: ArrayLike | None = None) -> SmoothRacingLineResult:
     """Build and corridor-check a planar spline using common track parameter ``s``."""
     if not track.closed:
         raise ValueError("periodic planar racing-line geometry requires a closed track")
@@ -138,7 +150,10 @@ def build_smooth_racing_line_path(track: Track, guide_offsets_m: ArrayLike, *,
         raise ValueError("boundary margin must be finite and non-negative")
     if not math.isfinite(boundary_check_spacing_m) or boundary_check_spacing_m <= 0:
         raise ValueError("boundary-check spacing must be finite and positive")
-    guide_s = np.arange(len(offsets), dtype=float) * track.total_length_m / len(offsets)
+    guide_s = (np.arange(len(offsets), dtype=float) * track.total_length_m / len(offsets)
+               if guide_s_m is None else np.asarray(guide_s_m, dtype=float))
+    if guide_s.ndim != 1 or len(guide_s) != len(offsets):
+        raise ValueError("guide stations must be a one-dimensional array matching guide offsets")
     guide_track = sample_track_stations(track, guide_s)
     left = guide_track.width_left_m - boundary_margin_m
     right = guide_track.width_right_m - boundary_margin_m
@@ -150,7 +165,7 @@ def build_smooth_racing_line_path(track: Track, guide_offsets_m: ArrayLike, *,
     check_count = max(4, math.ceil(track.total_length_m / boundary_check_spacing_m))
     check_s = np.arange(check_count, dtype=float) * track.total_length_m / check_count
     checked_track = sample_track_stations(track, check_s)
-    px, py, *_ = spline.evaluate(check_s)
+    px, py, dx, dy, *_ = spline.evaluate(check_s)
     delta_x, delta_y = px - checked_track.x_m, py - checked_track.y_m
     projected = delta_x * checked_track.normal_x + delta_y * checked_track.normal_y
     tangent = delta_x * checked_track.tangent_x + delta_y * checked_track.tangent_y
@@ -158,6 +173,9 @@ def build_smooth_racing_line_path(track: Track, guide_offsets_m: ArrayLike, *,
                            checked_track.width_right_m - boundary_margin_m + projected)
     if np.min(clearance) < -1e-10:
         raise ValueError(f"planar spline overshoots track boundary between guides (minimum clearance {np.min(clearance):.6g} m)")
+    forward = dx * checked_track.tangent_x + dy * checked_track.tangent_y
+    if not np.all(np.isfinite(forward)) or np.min(forward) <= 0:
+        raise ValueError(f"planar spline lacks forward progress (minimum dot product {np.min(forward):.6g})")
     path = spline.sampled_path(sample_spacing_m)
     return SmoothRacingLineResult(path, spline, guide_s, offsets, gx, gy, check_s,
-                                  projected, tangent, float(np.min(clearance)))
+                                  projected, tangent, float(np.min(clearance)), float(np.min(forward)))
