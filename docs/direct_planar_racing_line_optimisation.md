@@ -70,3 +70,20 @@ Parallelism changes wall-clock scheduling only. Results are collected in the
 original direction/sign order before the existing lap-time and order tie-break
 is applied. Polls remain all-or-nothing with respect to the evaluation budget,
 and the single pattern move retains its existing evaluation count and semantics.
+
+## Restarting from exported controls
+
+The Phase 8 diagnostic can start one track and one control policy from the best
+physical controls in an earlier `phase8_*_controls.csv` export. For example
+(shown as a Windows-compatible single line):
+
+```text
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --max-sweeps 100 --max-evaluations 12000 --workers 16 --initial-controls-csv phase8_mallala_controls.csv
+```
+
+This is a strict same-track, same-policy restart. The saved station layout and
+bounds must match those generated with the current boundary margin; controls
+are never reordered, interpolated, projected, or clipped. The restart restores
+only the physical control vector. Evaluation count, sweep count, current search
+step size, and process-pool state all begin fresh from the current
+`PlanarOptimisationConfig`.
