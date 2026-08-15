@@ -134,3 +134,24 @@ Phase 6 adds an optional, deterministic path-curvature transient speed ceiling t
 ## Phase 7 experimental planar racing line
 
 Track specifications remain piecewise analytic straights and circular arcs, including intentional curvature jumps. Phase 7 adds an alternative C2-periodic Cartesian motorcycle-path spline for side-by-side validation; it does not replace the Phase 5 offset-sampled optimiser default. See [the smooth planar racing-line design](docs/smooth_planar_racing_line.md) and run `python scripts/r6_phase7_planar_geometry_check.py` for reproducible comparisons.
+
+## Phase 7.5 Mallala reference track
+
+The QGIS-derived Mallala v0.3 reference adds a 23-primitive real-world
+fixed-path validation circuit and optional per-primitive half-width overrides.
+Global `width_left_m` and `width_right_m` remain defaults; either may be
+overridden on a primitive while the other inherits:
+
+```yaml
+width_left_m: 4.0
+width_right_m: 4.0
+primitives:
+  - type: straight
+    length_m: 100.0
+    width_left_m: 5.0
+```
+
+Run `python scripts/r6_mallala_reference_check.py` for the 2.0/1.0/0.5 m R6
+centreline resolution diagnostic and equal-scale boundary plot. See the
+[Mallala provenance, assumptions, and limitations](docs/mallala_reference_track.md).
+No racing-line optimisation is performed for Mallala in this phase.

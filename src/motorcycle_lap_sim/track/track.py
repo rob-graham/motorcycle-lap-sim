@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import math
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import yaml
@@ -37,15 +37,29 @@ class Track:
     width_left_m: float = 4.0
     width_right_m: float = 4.0
     closed: bool = False
+    primitive_width_left_m: tuple[float | None, ...] | None = None
+    primitive_width_right_m: tuple[float | None, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "primitives", tuple(self.primitives))
         if not self.primitives:
             raise ValueError("track requires at least one primitive")
-        if not math.isfinite(self.width_left_m) or self.width_left_m <= 0:
-            raise ValueError("left width must be finite and positive")
-        if not math.isfinite(self.width_right_m) or self.width_right_m <= 0:
-            raise ValueError("right width must be finite and positive")
+        left_default = _positive_width(self.width_left_m, "left width")
+        right_default = _positive_width(self.width_right_m, "right width")
+        object.__setattr__(self, "width_left_m", left_default)
+        object.__setattr__(self, "width_right_m", right_default)
+        object.__setattr__(self, "primitive_width_left_m", self._resolve_widths(
+            self.primitive_width_left_m, left_default, "left"))
+        object.__setattr__(self, "primitive_width_right_m", self._resolve_widths(
+            self.primitive_width_right_m, right_default, "right"))
+
+    def _resolve_widths(self, values: tuple[float | None, ...] | None,
+                        default: float, side: str) -> tuple[float, ...]:
+        supplied = (None,) * len(self.primitives) if values is None else tuple(values)
+        if len(supplied) != len(self.primitives):
+            raise ValueError(f"primitive {side} widths must match primitive count")
+        return tuple(default if value is None else _positive_width(
+            value, f"primitive {side} width") for value in supplied)
 
     @property
     def total_length_m(self) -> float:
@@ -75,6 +89,8 @@ class Track:
             data: dict[str, Any] = yaml.safe_load(stream)
         start = data.get("start", {})
         primitives: list[CentrelinePrimitive] = []
+        widths_left: list[float | None] = []
+        widths_right: list[float | None] = []
         for item in data["primitives"]:
             kind = item["type"]
             if kind == "straight":
@@ -83,8 +99,23 @@ class Track:
                 primitives.append(CircularArc(float(item["radius_m"]), float(item["turn_angle_rad"])))
             else:
                 raise ValueError(f"unknown track primitive type: {kind!r}")
+            widths_left.append(item.get("width_left_m"))
+            widths_right.append(item.get("width_right_m"))
         return cls(tuple(primitives), Pose(float(start.get("x_m", 0.0)),
                                            float(start.get("y_m", 0.0)),
                                            float(start.get("heading_rad", 0.0))),
                    float(data["width_left_m"]), float(data["width_right_m"]),
-                   bool(data.get("closed", False)))
+                   bool(data.get("closed", False)), tuple(widths_left), tuple(widths_right))
+
+
+def _positive_width(value: Any, label: str) -> float:
+    """Validate a track half-width without accepting booleans as numbers."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be numeric, finite, and positive")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be numeric, finite, and positive") from exc
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError(f"{label} must be numeric, finite, and positive")
+    return result

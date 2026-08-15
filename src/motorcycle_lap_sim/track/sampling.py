@@ -60,8 +60,12 @@ def sample_track_stations(track: Track, s_m, *, include_endpoint: bool = False) 
     for primitive in track.primitives[:-1]:
         start_poses.append(primitive.end_pose(start_poses[-1]))
     x = np.empty_like(s); y = np.empty_like(s); heading = np.empty_like(s); curvature = np.empty_like(s)
+    primitive_indices = np.empty(len(s), dtype=int)
     for j, distance in enumerate(s):
+        # A station exactly at a join belongs to the next primitive.  This is
+        # the established ``searchsorted(..., side="right")`` convention.
         index = min(int(np.searchsorted(starts_s[1:], distance, side="right")), len(track.primitives) - 1)
+        primitive_indices[j] = index
         local_s = min(float(distance - starts_s[index]), track.primitives[index].length_m)
         pose = track.primitives[index].pose_at(start_poses[index], local_s)
         x[j], y[j], heading[j] = pose.x_m, pose.y_m, pose.heading_rad
@@ -70,5 +74,6 @@ def sample_track_stations(track: Track, s_m, *, include_endpoint: bool = False) 
     # A +90 degree rotation gives the left-of-travel unit normal.
     nx, ny = -ty, tx
     return SampledTrack(s, x, y, heading, tx, ty, nx, ny, curvature,
-                        np.full_like(s, track.width_left_m),
-                        np.full_like(s, track.width_right_m), track.total_length_m, track.closed)
+                        np.asarray(track.primitive_width_left_m)[primitive_indices],
+                        np.asarray(track.primitive_width_right_m)[primitive_indices],
+                        track.total_length_m, track.closed)
