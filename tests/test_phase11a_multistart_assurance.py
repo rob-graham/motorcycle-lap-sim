@@ -58,3 +58,52 @@ def test_rank_candidates_uses_common_grid_and_stable_name_tie_break():
 
     ranked = diagnostic.rank_candidates(rows)
     assert [row["start_name"] for row in ranked] == ["alpha", "beta", "zeta"]
+
+
+def test_convergence_spread_interpretation_refuses_reused_controls():
+    diagnostic = _load_script()
+    rows = [
+        {
+            "run_source": "optimised",
+            "termination_reason": "maximum evaluations reached",
+            "final_step_m": 0.125,
+        },
+        {
+            "run_source": "reused_existing_controls",
+            "termination_reason": "reused existing final controls",
+            "final_step_m": "",
+        },
+    ]
+
+    count, interpretation = diagnostic.convergence_spread_interpretation(rows)
+
+    assert count is None
+    assert "termination metadata unavailable" in interpretation
+
+
+def test_convergence_spread_interpretation_detects_coarse_capped_runs():
+    diagnostic = _load_script()
+    rows = [
+        {
+            "run_source": "optimised",
+            "termination_reason": "maximum evaluations reached",
+            "final_step_m": 0.125,
+        },
+        {
+            "run_source": "optimised",
+            "termination_reason": "maximum evaluations reached",
+            "final_step_m": 1.0,
+        },
+    ]
+
+    count, interpretation = diagnostic.convergence_spread_interpretation(rows)
+
+    assert count == 1
+    assert "search-budget/convergence spread" in interpretation
+
+
+def test_summary_filename_separates_reuse_only_output():
+    diagnostic = _load_script()
+
+    assert diagnostic.summary_filename(False) == "phase11a_multistart_summary.csv"
+    assert diagnostic.summary_filename(True) == "phase11a_multistart_summary_reused.csv"
