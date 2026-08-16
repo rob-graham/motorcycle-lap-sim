@@ -2,7 +2,6 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 
 def _load_script():
@@ -34,7 +33,7 @@ def test_bounded_smooth_perturbation_is_deterministic_bounded_and_bidirectional(
     assert np.all(minus >= lower)
     assert np.all(minus <= upper)
     assert not np.array_equal(plus_a, minus)
-    assert np.max(np.abs(plus_a)) <= pytest.approx(0.6)
+    assert np.max(np.abs(plus_a)) <= 0.6 + 1e-12
 
 
 def test_rank_candidates_uses_common_grid_and_stable_name_tie_break():
