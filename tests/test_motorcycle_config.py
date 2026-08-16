@@ -24,12 +24,36 @@ def test_valid_configuration_loading():
 
 def test_optional_handling_configuration_and_validation():
     raw = data(); raw["handling"] = {"max_path_curvature_rate_1pmps": 0.8}
-    assert motorcycle_config_from_dict(raw).handling.max_path_curvature_rate_1pmps == 0.8
-    for handling in (None, 0.8, {}, {"max_path_curvature_rate_1pmps": 0},
-                     {"max_path_curvature_rate_1pmps": -1},
-                     {"max_path_curvature_rate_1pmps": float("nan")},
-                     {"max_path_curvature_rate_1pmps": float("inf")}):
-        raw = data(); raw["handling"] = handling
+    handling = motorcycle_config_from_dict(raw).handling
+    assert handling.max_path_curvature_rate_1pmps == 0.8
+    assert handling.max_roll_rate_radps is None
+
+    raw = data(); raw["handling"] = {"max_roll_rate_radps": 0.7}
+    handling = motorcycle_config_from_dict(raw).handling
+    assert handling.max_path_curvature_rate_1pmps is None
+    assert handling.max_roll_rate_radps == 0.7
+
+    raw = data(); raw["handling"] = {
+        "max_path_curvature_rate_1pmps": 0.8,
+        "max_roll_rate_radps": 0.7,
+    }
+    handling = motorcycle_config_from_dict(raw).handling
+    assert handling.max_path_curvature_rate_1pmps == 0.8
+    assert handling.max_roll_rate_radps == 0.7
+
+    invalid = (
+        None, 0.8, {},
+        {"max_path_curvature_rate_1pmps": 0},
+        {"max_path_curvature_rate_1pmps": -1},
+        {"max_path_curvature_rate_1pmps": float("nan")},
+        {"max_path_curvature_rate_1pmps": float("inf")},
+        {"max_roll_rate_radps": 0},
+        {"max_roll_rate_radps": -1},
+        {"max_roll_rate_radps": float("nan")},
+        {"max_roll_rate_radps": float("inf")},
+    )
+    for handling_raw in invalid:
+        raw = data(); raw["handling"] = handling_raw
         with pytest.raises(ValueError):
             motorcycle_config_from_dict(raw)
 
