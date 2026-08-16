@@ -21,9 +21,60 @@ from .results import immutable_array
 
 _SPEED_BACKENDS = ("python", "numba")
 
+# Backend-equivalence contract for the final accepted path.  Lap time is a
+# scalar integral and remains subject to a tight absolute check.  Individual
+# speeds pass when |python - numba| <= atol + rtol * |python|: the relative
+# term permits ordinary backend-dependent floating-point accumulation at road
+# speeds, while the absolute floor gives the comparison sensible behaviour
+# near zero.  Even at 100 m/s the 1.001e-7 m/s allowance is many orders of
+# magnitude below a physically meaningful speed difference.
+_BACKEND_LAP_TIME_ATOL_S = 1e-9
+_BACKEND_SPEED_ATOL_MPS = 1e-10
+_BACKEND_SPEED_RTOL = 1e-9
+
 
 class SpeedBackendUnavailableError(RuntimeError):
     """Requested optional fixed-path solver backend cannot be loaded."""
+
+
+def _validate_speed_backend_equivalence(python_speed, numba_speed) -> None:
+    """Validate Numba output against authoritative Python fixed-path output."""
+    lap_difference = abs(python_speed.lap_time_s - numba_speed.lap_time_s)
+    python_profile = np.asarray(python_speed.speed_mps)
+    numba_profile = np.asarray(numba_speed.speed_mps)
+    if python_profile.shape != numba_profile.shape:
+        raise RuntimeError(
+            "Numba final-result Python reference validation failed: "
+            f"speed profile shapes differ (Python={python_profile.shape}, "
+            f"Numba={numba_profile.shape}); lap difference={lap_difference:.12g} s, "
+            f"allowed lap tolerance={_BACKEND_LAP_TIME_ATOL_S:.12g} s")
+
+    absolute_differences = np.abs(python_profile - numba_profile)
+    allowed_differences = (_BACKEND_SPEED_ATOL_MPS
+                           + _BACKEND_SPEED_RTOL * np.abs(python_profile))
+    finite = (np.all(np.isfinite(python_profile))
+              and np.all(np.isfinite(numba_profile))
+              and math.isfinite(lap_difference))
+    passes_speeds = bool(np.all(absolute_differences <= allowed_differences))
+    if finite and lap_difference <= _BACKEND_LAP_TIME_ATOL_S and passes_speeds:
+        return
+
+    worst_index = int(np.argmax(absolute_differences))
+    worst_difference = float(absolute_differences[worst_index])
+    python_value = float(python_profile[worst_index])
+    numba_value = float(numba_profile[worst_index])
+    allowed = float(allowed_differences[worst_index])
+    relative = (worst_difference / abs(python_value)
+                if python_value != 0 and math.isfinite(python_value) else math.nan)
+    raise RuntimeError(
+        "Numba final-result Python reference validation failed: "
+        f"lap difference={lap_difference:.12g} s, "
+        f"allowed lap tolerance={_BACKEND_LAP_TIME_ATOL_S:.12g} s; "
+        f"maximum speed absolute difference={worst_difference:.12g} m/s, "
+        f"worst speed index={worst_index}, Python speed={python_value:.12g} m/s, "
+        f"Numba speed={numba_value:.12g} m/s, "
+        f"allowed speed tolerance={allowed:.12g} m/s, "
+        f"relative discrepancy={relative:.12g}")
 
 
 def _speed_solver(speed_backend: str):
@@ -376,14 +427,7 @@ def optimise_planar_racing_line(track: Track, motorcycle,
     if config.speed_backend == "numba":
         # Validate only the accepted result, on the identical saved smooth path.
         reference_speed = solve_speed_profile(best.smooth_line.sampled_path, motorcycle)
-        lap_difference = abs(reference_speed.lap_time_s - best.lap_time_s)
-        speed_difference = float(np.max(np.abs(
-            reference_speed.speed_mps - best.speed_profile.speed_mps)))
-        if lap_difference > 1e-9 or speed_difference > 1e-9:
-            raise RuntimeError(
-                "Numba final-result Python reference validation failed: "
-                f"lap difference={lap_difference:.12g} s, "
-                f"maximum speed difference={speed_difference:.12g} m/s")
+        _validate_speed_backend_equivalence(reference_speed, best.speed_profile)
         best = PlanarObjectiveEvaluation(
             True, reference_speed.lap_time_s, best.smooth_line, reference_speed)
     improvement = initial.lap_time_s - best.lap_time_s

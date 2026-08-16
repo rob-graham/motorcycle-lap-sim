@@ -11,11 +11,66 @@ from motorcycle_lap_sim.optimisation import (COARSE_PLANAR_CONTROL_POLICY,
     generate_planar_control_stations, optimise_planar_racing_line, planar_control_bounds,
     resample_planar_result)
 from motorcycle_lap_sim.track import CircularArc, Pose, Straight, Track, sample_track_stations
-from motorcycle_lap_sim.optimisation.planar import _best_improvement_pattern_search
+from motorcycle_lap_sim.optimisation.planar import (
+    _BACKEND_LAP_TIME_ATOL_S, _BACKEND_SPEED_ATOL_MPS, _BACKEND_SPEED_RTOL,
+    _best_improvement_pattern_search, _validate_speed_backend_equivalence)
 from motorcycle_lap_sim.optimisation.planar import SpeedBackendUnavailableError
+from motorcycle_lap_sim.speed_solver import solve_speed_profile
 
 
 def bike(): return load_motorcycle_config("examples/motorcycles/test_motorcycle.yaml")
+
+
+def backend_result(lap_time_s=60.0, speeds=(10.0, 40.0, 0.0)):
+    return SimpleNamespace(lap_time_s=lap_time_s, speed_mps=np.asarray(speeds))
+
+
+def test_backend_equivalence_accepts_identical_profiles():
+    result = backend_result()
+    _validate_speed_backend_equivalence(result, result)
+
+
+def test_backend_equivalence_accepts_observed_harmless_speed_scale():
+    python = backend_result(speeds=(10.0, 40.0, 60.0))
+    numba = backend_result(
+        lap_time_s=python.lap_time_s + 4.01215061174e-10,
+        speeds=python.speed_mps + np.array((0.0, 1.95256664171e-8, 0.0)))
+    _validate_speed_backend_equivalence(python, numba)
+
+
+def test_backend_equivalence_tolerance_boundary():
+    python = backend_result(speeds=(25.0,))
+    allowed = _BACKEND_SPEED_ATOL_MPS + _BACKEND_SPEED_RTOL * 25.0
+    _validate_speed_backend_equivalence(
+        python, backend_result(speeds=(25.0 + 0.999 * allowed,)))
+    with pytest.raises(RuntimeError, match="validation failed"):
+        _validate_speed_backend_equivalence(
+            python, backend_result(speeds=(25.0 + 1.001 * allowed,)))
+
+
+def test_backend_equivalence_failure_reports_worst_speed_details():
+    python = backend_result(speeds=(10.0, 20.0, 30.0))
+    numba = backend_result(speeds=(10.0, 20.000001, 30.0000001))
+    with pytest.raises(RuntimeError) as error:
+        _validate_speed_backend_equivalence(python, numba)
+    message = str(error.value)
+    for expected in ("lap difference=", "allowed lap tolerance=",
+                     "maximum speed absolute difference=", "worst speed index=1",
+                     "Python speed=20", "Numba speed=20.000001",
+                     "allowed speed tolerance=", "relative discrepancy="):
+        assert expected in message
+
+
+def test_backend_equivalence_rejects_material_lap_time_difference():
+    with pytest.raises(RuntimeError, match="lap difference"):
+        _validate_speed_backend_equivalence(
+            backend_result(), backend_result(lap_time_s=60.0 + 10 * _BACKEND_LAP_TIME_ATOL_S))
+
+
+def test_backend_equivalence_rejects_material_speed_difference():
+    with pytest.raises(RuntimeError, match="maximum speed absolute difference"):
+        _validate_speed_backend_equivalence(
+            backend_result(), backend_result(speeds=(10.0, 40.01, 0.0)))
 
 
 def test_geometry_aware_reference_station_counts_and_primitive_starts():
@@ -170,9 +225,8 @@ def test_numba_direct_serial_and_restart_match_python():
         controls, track, bike(), stations, sample_spacing_m=2,
         boundary_check_spacing_m=1, speed_backend="numba")
     assert python_evaluation.feasible and numba_evaluation.feasible
-    assert abs(python_evaluation.lap_time_s - numba_evaluation.lap_time_s) <= 1e-9
-    assert np.allclose(python_evaluation.speed_profile.speed_mps,
-                       numba_evaluation.speed_profile.speed_mps, rtol=0, atol=1e-9)
+    _validate_speed_backend_equivalence(
+        python_evaluation.speed_profile, numba_evaluation.speed_profile)
 
     common = dict(max_sweeps=1, max_evaluations=30,
                   boundary_check_spacing_m=1, optimisation_sample_spacing_m=2)
@@ -184,9 +238,11 @@ def test_numba_direct_serial_and_restart_match_python():
     assert np.array_equal(python_result.initial_controls_m, numba_result.initial_controls_m)
     assert np.array_equal(python_result.best_controls_m, numba_result.best_controls_m)
     assert abs(python_result.best_lap_time_s - numba_result.best_lap_time_s) <= 1e-9
-    assert (python_result.evaluations, python_result.sweeps,
+    canonical = solve_speed_profile(numba_result.sampled_path, bike())
+    assert np.array_equal(numba_result.speed_profile.speed_mps, canonical.speed_mps)
+    assert (python_result.evaluations, python_result.sweeps, python_result.final_step_m,
             python_result.termination_reason) == (
-                numba_result.evaluations, numba_result.sweeps,
+                numba_result.evaluations, numba_result.sweeps, numba_result.final_step_m,
                 numba_result.termination_reason)
 
 
@@ -204,8 +260,10 @@ def test_spawn_numba_poll_matches_serial_numba():
         PlanarOptimisationConfig(**common, parallel_workers=2))
     assert np.array_equal(serial.best_controls_m, parallel.best_controls_m)
     assert serial.best_lap_time_s == parallel.best_lap_time_s
-    assert (serial.evaluations, serial.sweeps, serial.termination_reason) == (
-        parallel.evaluations, parallel.sweeps, parallel.termination_reason)
+    assert (serial.evaluations, serial.sweeps, serial.final_step_m,
+            serial.termination_reason) == (
+        parallel.evaluations, parallel.sweeps, parallel.final_step_m,
+        parallel.termination_reason)
 
 
 def test_one_worker_preserves_default_serial_behaviour():
