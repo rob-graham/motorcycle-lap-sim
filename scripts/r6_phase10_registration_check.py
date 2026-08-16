@@ -19,7 +19,7 @@ from motorcycle_lap_sim.telemetry import (
     require_time_alignment,
 )
 from motorcycle_lap_sim.telemetry.map_match import Rigid2DTransform, map_match_nearest
-from motorcycle_lap_sim.track import Track, sample_track
+from motorcycle_lap_sim.track import Track, sample_track, sample_track_stations
 
 
 def build_parser():
@@ -116,7 +116,36 @@ def _print_heading_summary(headings_rad, peer_deviation_m, quality, indices, bin
             f"speed_accuracy_median_mps={np.nanmedian(quality.speed_accuracy_mps[source]):.9f}")
 
 
-def _write_envelope_csv(path, offset_envelope, speed_envelope):
+def _corridor_diagnostics(track, offset_envelope):
+    """Compare the measured envelope with nominal model widths without correcting either."""
+    reference = sample_track_stations(track, offset_envelope.chainage_m)
+    median = offset_envelope.median
+    p10 = offset_envelope.p10
+    p90 = offset_envelope.p90
+    median_excess = np.maximum.reduce((
+        median - reference.width_left_m,
+        -reference.width_right_m - median,
+        np.zeros_like(median),
+    ))
+    percentile_touches_outside = ((p90 > reference.width_left_m)
+                                  | (p10 < -reference.width_right_m))
+    percentile_fully_outside = ((p10 > reference.width_left_m)
+                                 | (p90 < -reference.width_right_m))
+    median_outside = median_excess > 0.0
+    worst = int(np.argmax(median_excess))
+    print(f"median_outside_model_corridor_bins={np.count_nonzero(median_outside)}/{len(median)}")
+    print(f"p10_p90_touches_outside_model_corridor_bins="
+          f"{np.count_nonzero(percentile_touches_outside)}/{len(median)}")
+    print(f"p10_p90_fully_outside_model_corridor_bins="
+          f"{np.count_nonzero(percentile_fully_outside)}/{len(median)}")
+    print(f"maximum_median_model_corridor_excess_m={median_excess[worst]:.9f}")
+    print(f"maximum_median_model_corridor_excess_chainage_m={offset_envelope.chainage_m[worst]:.9f}")
+    print("corridor_note=consistent measured offsets beyond nominal model width indicate local reference-geometry mismatch, not automatic rider off-track classification")
+    return reference, median_excess, percentile_touches_outside
+
+
+def _write_envelope_csv(path, offset_envelope, speed_envelope,
+                        corridor_reference, median_excess, percentile_touches_outside):
     if not np.allclose(offset_envelope.chainage_m, speed_envelope.chainage_m,
                        rtol=0.0, atol=1e-12):
         raise ValueError("offset and speed envelope chainage grids do not match")
@@ -124,17 +153,21 @@ def _write_envelope_csv(path, offset_envelope, speed_envelope):
         writer = csv.writer(stream)
         writer.writerow((
             "chainage_m",
+            "model_width_left_m", "model_width_right_m",
             "offset_lap_count", "offset_median_m", "offset_p10_m", "offset_p90_m",
-            "offset_min_m", "offset_max_m",
+            "offset_min_m", "offset_max_m", "median_model_corridor_excess_m",
+            "p10_p90_touches_outside_model_corridor",
             "speed_lap_count", "speed_median_mps", "speed_p10_mps", "speed_p90_mps",
             "speed_min_mps", "speed_max_mps",
         ))
         for index, chainage in enumerate(offset_envelope.chainage_m):
             writer.writerow((
                 chainage,
+                corridor_reference.width_left_m[index], corridor_reference.width_right_m[index],
                 offset_envelope.lap_count[index], offset_envelope.median[index],
                 offset_envelope.p10[index], offset_envelope.p90[index],
                 offset_envelope.minimum[index], offset_envelope.maximum[index],
+                median_excess[index], int(percentile_touches_outside[index]),
                 speed_envelope.lap_count[index], speed_envelope.median[index],
                 speed_envelope.p10[index], speed_envelope.p90[index],
                 speed_envelope.minimum[index], speed_envelope.maximum[index],
@@ -251,8 +284,12 @@ def main(argv=None):
                      & (speed_envelope.lap_count == len(laps)))
     print(f"envelope_bins={len(offset_envelope.chainage_m)}")
     print(f"envelope_bins_with_all_laps={np.count_nonzero(complete_bins)}")
+    corridor_reference, median_excess, percentile_touches_outside = _corridor_diagnostics(
+        track, offset_envelope)
     if args.envelope_csv is not None:
-        _write_envelope_csv(args.envelope_csv, offset_envelope, speed_envelope)
+        _write_envelope_csv(
+            args.envelope_csv, offset_envelope, speed_envelope,
+            corridor_reference, median_excess, percentile_touches_outside)
         print(f"envelope_csv={args.envelope_csv}")
 
 
