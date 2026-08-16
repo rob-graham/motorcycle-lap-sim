@@ -3,9 +3,10 @@ import math
 import numpy as np
 import pytest
 
-from motorcycle_lap_sim.telemetry import lap_slices, load_aim_workbook
+from motorcycle_lap_sim.telemetry import fit_rigid_registration, lap_slices, load_aim_workbook
 from motorcycle_lap_sim.telemetry.map_match import Rigid2DTransform, map_match_nearest
 from motorcycle_lap_sim.track import Pose, Straight, Track, sample_track
+from motorcycle_lap_sim.track.sampling import SampledTrack
 
 
 HEADERS = [
@@ -70,3 +71,59 @@ def test_map_match_reports_signed_offset_for_straight():
     assert np.allclose(match.chainage_m, [5.0, 10.0])
     assert np.allclose(match.lateral_offset_m, [2.0, -3.0])
     assert np.allclose(match.reference_distance_m, [2.0, 3.0])
+
+
+def _sampled_reference_points(x, y):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    count = len(x)
+    s = np.arange(count, dtype=float) * 10.0
+    zeros = np.zeros(count)
+    ones = np.ones(count)
+    return SampledTrack(
+        s_m=s,
+        x_m=x,
+        y_m=y,
+        heading_rad=zeros,
+        tangent_x=ones,
+        tangent_y=zeros,
+        normal_x=zeros,
+        normal_y=ones,
+        curvature_1pm=zeros,
+        width_left_m=np.full(count, 5.0),
+        width_right_m=np.full(count, 5.0),
+        total_length_m=float(max(10.0, s[-1] + 10.0)),
+        closed=False,
+    )
+
+
+def test_rigid_registration_recovers_transform_and_trims_position_outlier():
+    target_x = np.array([0.0, 12.0, 25.0, 31.0, 24.0, 10.0, -2.0, -7.0])
+    target_y = np.array([0.0, 2.0, 8.0, 20.0, 31.0, 34.0, 25.0, 11.0])
+    sampled = _sampled_reference_points(target_x, target_y)
+
+    true_transform = Rigid2DTransform(270780.0, 6188972.0, math.radians(-91.0))
+    theta = true_transform.local_x_bearing_rad - math.pi / 2.0
+    c, s = math.cos(theta), math.sin(theta)
+    rotation = np.array([[c, -s], [s, c]])
+    local = np.column_stack((target_x, target_y))
+    world = np.array([true_transform.origin_east_m, true_transform.origin_north_m]) + local @ rotation
+    east = world[:, 0].copy()
+    north = world[:, 1].copy()
+
+    # Simulate a transient GPS position error at one sample.  The registration
+    # should not move the track transform to explain it.
+    east[-1] += 40.0
+    north[-1] -= 25.0
+
+    initial = Rigid2DTransform(270781.0, 6188971.0, math.radians(-90.5))
+    result = fit_rigid_registration(
+        east, north, sampled, initial, trim_fraction=0.875, max_iterations=20)
+
+    assert result.transform.origin_east_m == pytest.approx(true_transform.origin_east_m, abs=1e-6)
+    assert result.transform.origin_north_m == pytest.approx(true_transform.origin_north_m, abs=1e-6)
+    assert result.transform.local_x_bearing_rad == pytest.approx(
+        true_transform.local_x_bearing_rad, abs=1e-8)
+    assert np.count_nonzero(result.inlier_mask) == 7
+    assert not result.inlier_mask[-1]
+    assert result.rms_residual_m < 1e-6
