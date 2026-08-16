@@ -112,7 +112,14 @@ class PlanarControlStationPolicy:
             raise ValueError("control-station policy limits must be finite and positive")
 
 
-COARSE_PLANAR_CONTROL_POLICY = PlanarControlStationPolicy(150.0, math.radians(60.0))
+# This is deliberately only modestly coarser than the reference policy.  The
+# former 150 m / 60 degree policy used too few guides to represent Mallala's
+# analytic centreline: its periodic cubic spline left the usable corridor by
+# 0.627 m even with zero offsets.  A generic centreline therefore could not be
+# used to initialise the coarse optimiser.  These limits are the coarsest
+# round-number pair tested for which that analytically understandable seed
+# remains feasible under the standard 0.25 m boundary margin/check spacing.
+COARSE_PLANAR_CONTROL_POLICY = PlanarControlStationPolicy(125.0, math.radians(50.0))
 REFERENCE_PLANAR_CONTROL_POLICY = PlanarControlStationPolicy(100.0, math.radians(45.0))
 FINE_PLANAR_CONTROL_POLICY = PlanarControlStationPolicy(75.0, math.radians(30.0))
 

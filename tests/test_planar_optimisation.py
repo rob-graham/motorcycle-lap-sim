@@ -79,8 +79,8 @@ def test_geometry_aware_reference_station_counts_and_primitive_starts():
     oval=Track.from_yaml("examples/tracks/test_oval.yaml")
     mallala=Track.from_yaml("examples/tracks/mallala_reference.yaml")
     policies=(COARSE_PLANAR_CONTROL_POLICY,REFERENCE_PLANAR_CONTROL_POLICY,FINE_PLANAR_CONTROL_POLICY)
-    assert [len(generate_planar_control_stations(oval,p)) for p in policies] == [8,10,16]
-    assert [len(generate_planar_control_stations(mallala,p)) for p in policies] == [41,52,67]
+    assert [len(generate_planar_control_stations(oval,p)) for p in policies] == [10,10,16]
+    assert [len(generate_planar_control_stations(mallala,p)) for p in policies] == [46,52,67]
     stations=generate_planar_control_stations(mallala,REFERENCE_PLANAR_CONTROL_POLICY)
     assert stations[0] == 0 and stations[-1] < mallala.total_length_m and np.all(np.diff(stations)>0)
     assert all(np.any(np.isclose(stations,start,atol=1e-10))

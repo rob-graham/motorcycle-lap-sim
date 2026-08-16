@@ -4,6 +4,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from motorcycle_lap_sim.motorcycle.config import load_motorcycle_config
+from motorcycle_lap_sim.optimisation import (
+    COARSE_PLANAR_CONTROL_POLICY,
+    evaluate_planar_racing_line,
+    generate_planar_control_stations,
+)
+from motorcycle_lap_sim.track import Track
+
 
 def _load_script():
     path = Path("scripts/r6_phase11b_hierarchical_warm_start.py").resolve()
@@ -47,3 +55,19 @@ def test_periodic_linear_transfer_rejects_unsorted_sources():
             np.array([10.0]),
             100.0,
         )
+
+
+def test_mallala_coarse_policy_accepts_generic_centreline_seed():
+    """Guard the initial candidate used by the Phase 11B command."""
+    track = Track.from_yaml("examples/tracks/mallala_reference.yaml")
+    motorcycle = load_motorcycle_config("examples/motorcycles/r6_2017plus_reference.yaml")
+    stations = generate_planar_control_stations(track, COARSE_PLANAR_CONTROL_POLICY)
+
+    evaluation = evaluate_planar_racing_line(
+        np.zeros(len(stations)), track, motorcycle, stations,
+        sample_spacing_m=1.0,
+        boundary_margin_m=0.25,
+        boundary_check_spacing_m=0.25,
+    )
+
+    assert evaluation.feasible, evaluation.failure_reason
