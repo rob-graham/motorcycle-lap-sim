@@ -1,5 +1,6 @@
 import math
 import builtins
+import pickle
 from types import SimpleNamespace
 import numpy as np
 import pytest
@@ -13,7 +14,8 @@ from motorcycle_lap_sim.optimisation import (COARSE_PLANAR_CONTROL_POLICY,
 from motorcycle_lap_sim.track import CircularArc, Pose, Straight, Track, sample_track_stations
 from motorcycle_lap_sim.optimisation.planar import (
     _BACKEND_LAP_TIME_ATOL_S, _BACKEND_SPEED_ATOL_MPS, _BACKEND_SPEED_RTOL,
-    _best_improvement_pattern_search, _validate_speed_backend_equivalence)
+    _PlanarWorkerEvaluation, _best_improvement_pattern_search,
+    _compact_planar_evaluation, _validate_speed_backend_equivalence)
 from motorcycle_lap_sim.optimisation.planar import SpeedBackendUnavailableError
 from motorcycle_lap_sim.speed_solver import solve_speed_profile
 
@@ -138,6 +140,68 @@ def test_invalid_planar_candidate_is_deterministic_infeasibility():
     second=evaluate_planar_racing_line(np.full(len(stations),20.),track,bike(),stations)
     assert not first.feasible and first.lap_time_s == math.inf
     assert first.failure_reason == second.failure_reason
+
+
+def test_compact_worker_evaluation_preserves_scalars_without_artifacts():
+    full = SimpleNamespace(feasible=True, lap_time_s=12.345, failure_reason=None,
+                           smooth_line=np.zeros(100_000),
+                           speed_profile=np.zeros(100_000))
+    compact = _compact_planar_evaluation(full)
+
+    assert compact.feasible is full.feasible
+    assert compact.lap_time_s == full.lap_time_s
+    assert compact.failure_reason is full.failure_reason
+    assert not hasattr(compact, "smooth_line")
+    assert not hasattr(compact, "speed_profile")
+    assert len(pickle.dumps(compact)) * 1000 < len(pickle.dumps(full))
+
+
+def test_parallel_poll_materialises_only_winner_without_counting_it():
+    materialisations = []
+
+    def evaluate(controls):
+        return SimpleNamespace(feasible=True, lap_time_s=float((controls[0] - 2) ** 2),
+                               smooth_line="full", speed_profile="full")
+
+    def compact_poll(candidates):
+        return [_PlanarWorkerEvaluation(True, evaluate(candidate).lap_time_s)
+                for candidate in candidates]
+
+    def materialise(controls, worker):
+        materialisations.append(controls.copy())
+        return SimpleNamespace(feasible=True, lap_time_s=worker.lap_time_s,
+                               smooth_line="full", speed_profile="full")
+
+    initial_controls = np.zeros(1)
+    initial = evaluate(initial_controls)
+    result = _best_improvement_pattern_search(
+        initial_controls, np.array([-3.]), np.array([3.]), initial, evaluate,
+        PlanarOptimisationConfig(max_sweeps=1, max_evaluations=20),
+        compact_poll, materialise)
+
+    # Six poll directions and one parent pattern move are search evaluations;
+    # artifact regeneration is deliberately absent from the count.
+    assert result[2] == 8
+    assert len(materialisations) == 1
+    assert np.array_equal(materialisations[0], [1.])
+    assert np.array_equal(result[0], [2.])
+
+
+def test_non_improving_compact_poll_does_not_materialise():
+    def evaluate(controls):
+        return SimpleNamespace(feasible=True, lap_time_s=float(np.sum(controls ** 2)))
+
+    materialisations = []
+    controls = np.zeros(1)
+    result = _best_improvement_pattern_search(
+        controls, np.array([-2.]), np.array([2.]), evaluate(controls), evaluate,
+        PlanarOptimisationConfig(max_sweeps=1, max_evaluations=10),
+        lambda candidates: (_PlanarWorkerEvaluation(
+            True, evaluate(candidate).lap_time_s) for candidate in candidates),
+        lambda *args: materialisations.append(args))
+
+    assert materialisations == []
+    assert result[2] == 7
 
 
 def test_planar_pattern_search_accepts_bounded_initial_controls():

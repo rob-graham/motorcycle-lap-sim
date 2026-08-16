@@ -32,6 +32,11 @@ _BACKEND_LAP_TIME_ATOL_S = 1e-9
 _BACKEND_SPEED_ATOL_MPS = 1e-10
 _BACKEND_SPEED_RTOL = 1e-9
 
+# A poll winner is evaluated by the same configured backend in a spawned worker
+# and again in the parent solely to materialise its discarded artifacts.  This
+# tight absolute tolerance admits only insignificant same-backend round-off.
+_POLL_MATERIALISATION_LAP_TIME_ATOL_S = 1e-9
+
 
 class SpeedBackendUnavailableError(RuntimeError):
     """Requested optional fixed-path solver backend cannot be loaded."""
@@ -151,6 +156,22 @@ class PlanarObjectiveEvaluation:
 
 
 @dataclass(frozen=True)
+class _PlanarWorkerEvaluation:
+    """Compact search scalars returned across the process boundary."""
+
+    feasible: bool
+    lap_time_s: float
+    failure_reason: str | None = None
+
+
+def _compact_planar_evaluation(
+        evaluation: PlanarObjectiveEvaluation) -> _PlanarWorkerEvaluation:
+    """Discard candidate artifacts while preserving its exact search values."""
+    return _PlanarWorkerEvaluation(
+        evaluation.feasible, evaluation.lap_time_s, evaluation.failure_reason)
+
+
+@dataclass(frozen=True)
 class _PlanarWorkerContext:
     """Immutable per-process data installed once by the pool initializer."""
 
@@ -179,17 +200,18 @@ def _initialise_planar_worker(track: Track, motorcycle, control_s_m: NDArray[np.
     _speed_solver(speed_backend)
 
 
-def _evaluate_planar_worker(controls_m: NDArray[np.float64]) -> PlanarObjectiveEvaluation:
+def _evaluate_planar_worker(controls_m: NDArray[np.float64]) -> _PlanarWorkerEvaluation:
     """Spawn-picklable candidate evaluator used by :class:`ProcessPoolExecutor`."""
     context = _planar_worker_context
     if context is None:
         raise RuntimeError("planar worker evaluation context was not initialized")
-    return evaluate_planar_racing_line(
+    evaluation = evaluate_planar_racing_line(
         controls_m, context.track, context.motorcycle, context.control_s_m,
         sample_spacing_m=context.sample_spacing_m,
         boundary_margin_m=context.boundary_margin_m,
         boundary_check_spacing_m=context.boundary_check_spacing_m,
         speed_backend=context.speed_backend)
+    return _compact_planar_evaluation(evaluation)
 
 
 def evaluate_planar_racing_line(controls_m: ArrayLike, track: Track, motorcycle,
@@ -316,6 +338,8 @@ def _best_improvement_pattern_search(
         config: PlanarOptimisationConfig,
         evaluate_candidates: Callable[[Iterable[NDArray[np.float64]]],
                                       Iterable[PlanarObjectiveEvaluation]] | None = None,
+        materialise_candidate: Callable[[NDArray[np.float64], object],
+                                        PlanarObjectiveEvaluation] | None = None,
         progress_callback: Callable[[PlanarOptimisationProgress], None] | None = None):
     """Poll all coordinate/coupled moves and accept only the best candidate.
 
@@ -365,6 +389,8 @@ def _best_improvement_pattern_search(
         if improving:
             _, _, _, controls, best, accepted_direction = min(
                 improving, key=lambda item: (item[0], item[1], item[2]))
+            if materialise_candidate is not None:
+                best = materialise_candidate(controls, best)
             # A deliberately modest pattern move: clipping is component-wise,
             # and a fully clipped/no-change move consumes no evaluation.
             pattern = np.clip(controls + step * accepted_direction, lower, upper)
@@ -425,6 +451,22 @@ def optimise_planar_racing_line(track: Track, motorcycle,
     def evaluate(candidate):
         return evaluate_planar_racing_line(candidate, track, motorcycle, control_s, **kwargs)
 
+    def materialise(candidate, worker_evaluation):
+        """Regenerate artifacts without replacing the worker's search scalar."""
+        regenerated = evaluate(candidate)
+        difference = abs(regenerated.lap_time_s - worker_evaluation.lap_time_s)
+        if (not regenerated.feasible or not math.isfinite(difference)
+                or difference > _POLL_MATERIALISATION_LAP_TIME_ATOL_S):
+            raise RuntimeError(
+                "parallel poll winner artifact materialisation disagreed with worker: "
+                f"worker lap_time_s={worker_evaluation.lap_time_s:.17g}, "
+                f"parent lap_time_s={regenerated.lap_time_s:.17g}, "
+                f"parent feasible={regenerated.feasible}, "
+                f"allowed tolerance={_POLL_MATERIALISATION_LAP_TIME_ATOL_S:.12g} s")
+        return PlanarObjectiveEvaluation(
+            True, worker_evaluation.lap_time_s, regenerated.smooth_line,
+            regenerated.speed_profile)
+
     if config.parallel_workers == 1:
         controls, best, evaluations, sweeps, step, reason = _best_improvement_pattern_search(
             controls, lower, upper, initial, evaluate, config,
@@ -445,7 +487,8 @@ def optimise_planar_racing_line(track: Track, motorcycle,
                 _best_improvement_pattern_search(
                     controls, lower, upper, initial, evaluate, config,
                     lambda candidates: executor.map(
-                        _evaluate_planar_worker, candidates), progress_callback))
+                        _evaluate_planar_worker, candidates), materialise,
+                    progress_callback))
     assert best.smooth_line is not None and best.speed_profile is not None
     if config.speed_backend == "numba":
         # Validate only the accepted result, on the identical saved smooth path.
