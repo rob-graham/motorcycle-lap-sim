@@ -19,7 +19,7 @@ import numpy as np
 
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
 from motorcycle_lap_sim.optimisation import (
-    COARSE_PLANAR_CONTROL_POLICY,
+    PlanarControlStationPolicy,
     REFERENCE_PLANAR_CONTROL_POLICY,
     PlanarOptimisationConfig,
     evaluate_planar_racing_line,
@@ -31,6 +31,15 @@ from motorcycle_lap_sim.track import Track
 
 
 DEFAULT_RANKING_SPACING_M = 0.25
+
+# The library's 150 m / 60 degree coarse policy is too sparse to represent the
+# canonical Mallala centreline with the periodic planar spline: even zero
+# offsets overshoot the track between guides.  This intermediate policy is the
+# coarsest round-number policy verified to keep that analytical centreline
+# inside the configured boundary margin while retaining fewer controls than the
+# reference policy.
+HIERARCHICAL_COARSE_CONTROL_POLICY = PlanarControlStationPolicy(
+    125.0, math.radians(45.0))
 
 
 def _load_sibling(filename, module_name):
@@ -163,7 +172,8 @@ def main(argv=None):
     bike = replace(
         base_bike, handling=HandlingConfig(max_roll_rate_radps=args.max_roll_rate_radps))
 
-    coarse_s = generate_planar_control_stations(track, COARSE_PLANAR_CONTROL_POLICY)
+    coarse_s = generate_planar_control_stations(
+        track, HIERARCHICAL_COARSE_CONTROL_POLICY)
     coarse_lower, coarse_upper = planar_control_bounds(
         track, coarse_s, phase9.BOUNDARY_MARGIN_M)
     coarse_centreline = np.clip(np.zeros_like(coarse_s), coarse_lower, coarse_upper)
@@ -189,7 +199,7 @@ def main(argv=None):
     print(f"common_ranking_spacing_m={args.ranking_spacing_m:.3f}")
 
     coarse = _run(
-        "coarse_from_centreline", track, bike, COARSE_PLANAR_CONTROL_POLICY,
+        "coarse_from_centreline", track, bike, HIERARCHICAL_COARSE_CONTROL_POLICY,
         _config(args, args.coarse_max_evaluations, args.coarse_max_sweeps),
         coarse_centreline,
     )
