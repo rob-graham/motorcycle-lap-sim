@@ -97,7 +97,7 @@ def _sampled_reference_points(x, y):
     )
 
 
-def test_rigid_registration_recovers_transform_and_trims_position_outlier():
+def _registration_fixture():
     target_x = np.array([0.0, 12.0, 25.0, 31.0, 24.0, 10.0, -2.0, -7.0])
     target_y = np.array([0.0, 2.0, 8.0, 20.0, 31.0, 34.0, 25.0, 11.0])
     sampled = _sampled_reference_points(target_x, target_y)
@@ -108,8 +108,11 @@ def test_rigid_registration_recovers_transform_and_trims_position_outlier():
     rotation = np.array([[c, -s], [s, c]])
     local = np.column_stack((target_x, target_y))
     world = np.array([true_transform.origin_east_m, true_transform.origin_north_m]) + local @ rotation
-    east = world[:, 0].copy()
-    north = world[:, 1].copy()
+    return sampled, true_transform, world[:, 0].copy(), world[:, 1].copy()
+
+
+def test_rigid_registration_recovers_transform_and_trims_position_outlier():
+    sampled, true_transform, east, north = _registration_fixture()
 
     # Simulate a transient GPS position error at one sample.  The registration
     # should not move the track transform to explain it.
@@ -126,4 +129,20 @@ def test_rigid_registration_recovers_transform_and_trims_position_outlier():
         true_transform.local_x_bearing_rad, abs=1e-8)
     assert np.count_nonzero(result.inlier_mask) == 7
     assert not result.inlier_mask[-1]
+    assert result.converged
+    assert result.final_translation_delta_m <= 1e-4
+    assert result.final_bearing_delta_rad <= 1e-7
     assert result.rms_residual_m < 1e-6
+
+
+def test_rigid_registration_reports_iteration_limit_without_claiming_convergence():
+    sampled, _, east, north = _registration_fixture()
+    initial = Rigid2DTransform(270781.0, 6188971.0, math.radians(-90.5))
+
+    result = fit_rigid_registration(
+        east, north, sampled, initial, trim_fraction=1.0, max_iterations=1)
+
+    assert result.iterations == 1
+    assert not result.converged
+    assert (result.final_translation_delta_m > 1e-4
+            or result.final_bearing_delta_rad > 1e-7)
