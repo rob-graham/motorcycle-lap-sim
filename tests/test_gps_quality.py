@@ -56,3 +56,14 @@ def test_require_time_alignment_rejects_shifted_quality_series():
 
     with pytest.raises(ValueError, match="sample-aligned"):
         require_time_alignment(np.array([0.0, 0.05]), quality)
+
+
+def test_gps_quality_series_rejects_multidimensional_channels():
+    with pytest.raises(ValueError, match="one-dimensional"):
+        GPSQualitySeries(
+            time_s=np.array([0.0, 0.05]),
+            satellites=np.array([[10.0], [11.0]]),
+            position_accuracy_m=np.array([1.0, 1.0]),
+            speed_accuracy_mps=np.array([0.2, 0.2]),
+            source_sheet="raw",
+        )
