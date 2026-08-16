@@ -13,6 +13,14 @@ from .repeatability import (
     cross_lap_envelope,
     unwrap_closed_chainage,
 )
+from .speed_comparison import (
+    SpeedComparisonSummary,
+    SpeedEnvelopeComparison,
+    compare_speed_envelope,
+    periodic_interpolate,
+    summarize_speed_comparison,
+    uniform_closed_parameter_grid,
+)
 
 __all__ = [
     "TelemetryLap",
@@ -32,4 +40,10 @@ __all__ = [
     "unwrap_closed_chainage",
     "chainage_progress_diagnostics",
     "cross_lap_envelope",
+    "SpeedEnvelopeComparison",
+    "SpeedComparisonSummary",
+    "uniform_closed_parameter_grid",
+    "periodic_interpolate",
+    "compare_speed_envelope",
+    "summarize_speed_comparison",
 ]
