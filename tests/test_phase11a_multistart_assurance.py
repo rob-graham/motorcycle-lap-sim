@@ -1,0 +1,109 @@
+import importlib.util
+from pathlib import Path
+
+import numpy as np
+
+
+def _load_script():
+    path = Path("scripts/r6_phase11a_multistart_assurance.py").resolve()
+    spec = importlib.util.spec_from_file_location("r6_phase11a_multistart_assurance_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_bounded_smooth_perturbation_is_deterministic_bounded_and_bidirectional():
+    diagnostic = _load_script()
+    stations = np.linspace(0.0, 900.0, 10, endpoint=False)
+    base = np.zeros(10)
+    lower = np.full(10, -0.4)
+    upper = np.full(10, 0.6)
+
+    plus_a = diagnostic.bounded_smooth_perturbation(
+        base, stations, 1000.0, lower, upper, 1.0, +1)
+    plus_b = diagnostic.bounded_smooth_perturbation(
+        base, stations, 1000.0, lower, upper, 1.0, +1)
+    minus = diagnostic.bounded_smooth_perturbation(
+        base, stations, 1000.0, lower, upper, 1.0, -1)
+
+    assert np.array_equal(plus_a, plus_b)
+    assert np.all(plus_a >= lower)
+    assert np.all(plus_a <= upper)
+    assert np.all(minus >= lower)
+    assert np.all(minus <= upper)
+    assert not np.array_equal(plus_a, minus)
+    assert np.max(np.abs(plus_a)) <= 0.6 + 1e-12
+
+
+def test_backoff_to_feasible_uses_first_accepted_scale():
+    diagnostic = _load_script()
+    proposed = np.array([2.0, -2.0])
+    fallback = np.zeros(2)
+
+    candidate, scale = diagnostic.backoff_to_feasible(
+        proposed, fallback, lambda values: np.max(np.abs(values)) <= 0.5)
+
+    assert scale == 0.25
+    assert np.allclose(candidate, [0.5, -0.5])
+
+
+def test_rank_candidates_uses_common_grid_and_stable_name_tie_break():
+    diagnostic = _load_script()
+    rows = [
+        {"start_name": "zeta", "common_grid_lap_s": 71.2},
+        {"start_name": "beta", "common_grid_lap_s": 71.1},
+        {"start_name": "alpha", "common_grid_lap_s": 71.1},
+    ]
+
+    ranked = diagnostic.rank_candidates(rows)
+    assert [row["start_name"] for row in ranked] == ["alpha", "beta", "zeta"]
+
+
+def test_convergence_spread_interpretation_refuses_reused_controls():
+    diagnostic = _load_script()
+    rows = [
+        {
+            "run_source": "optimised",
+            "termination_reason": "maximum evaluations reached",
+            "final_step_m": 0.125,
+        },
+        {
+            "run_source": "reused_existing_controls",
+            "termination_reason": "reused existing final controls",
+            "final_step_m": "",
+        },
+    ]
+
+    count, interpretation = diagnostic.convergence_spread_interpretation(rows)
+
+    assert count is None
+    assert "termination metadata unavailable" in interpretation
+
+
+def test_convergence_spread_interpretation_detects_coarse_capped_runs():
+    diagnostic = _load_script()
+    rows = [
+        {
+            "run_source": "optimised",
+            "termination_reason": "maximum evaluations reached",
+            "final_step_m": 0.125,
+        },
+        {
+            "run_source": "optimised",
+            "termination_reason": "maximum evaluations reached",
+            "final_step_m": 1.0,
+        },
+    ]
+
+    count, interpretation = diagnostic.convergence_spread_interpretation(rows)
+
+    assert count == 1
+    assert "search-budget/convergence spread" in interpretation
+
+
+def test_summary_filename_separates_reuse_only_output():
+    diagnostic = _load_script()
+
+    assert diagnostic.summary_filename(False) == "phase11a_multistart_summary.csv"
+    assert diagnostic.summary_filename(True) == "phase11a_multistart_summary_reused.csv"

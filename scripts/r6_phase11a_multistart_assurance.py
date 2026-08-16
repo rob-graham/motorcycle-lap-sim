@@ -1,0 +1,456 @@
+"""Screen Mallala roll-aware optimisation sensitivity to deterministic starting lines.
+
+This Phase 11A diagnostic does not introduce a new optimiser or new physics. It
+runs the existing deterministic planar optimiser from a small set of materially
+different starting controls, then re-evaluates every final candidate on one
+common fine grid using the Python speed backend.
+
+The objective is optimisation assurance for track-layout work. When starts hit
+the evaluation cap at materially different search-step sizes, their lap-time
+spread is a search-budget/convergence diagnostic, not evidence for a family of
+converged local optima.
+"""
+
+import argparse
+import csv
+from dataclasses import replace
+import importlib.util
+import math
+from pathlib import Path
+import time
+
+import numpy as np
+
+from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
+from motorcycle_lap_sim.optimisation import (
+    PlanarOptimisationConfig,
+    REFERENCE_PLANAR_CONTROL_POLICY,
+    evaluate_planar_racing_line,
+    generate_planar_control_stations,
+    optimise_planar_racing_line,
+    planar_control_bounds,
+)
+from motorcycle_lap_sim.track import Track
+
+
+DEFAULT_PERTURBATION_AMPLITUDE_M = 1.0
+DEFAULT_RANKING_SPACING_M = 0.25
+RANKING_SPACINGS_M = (1.0, 0.5, 0.25)
+BACKOFF_SCALES = (1.0, 0.75, 0.5, 0.25, 0.125, 0.0625, 0.0)
+
+
+def _load_sibling(filename, module_name):
+    path = Path(__file__).resolve().with_name(filename)
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load sibling script from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+phase8 = _load_sibling(
+    "r6_phase8_planar_optimisation_check.py", "r6_phase8_for_multistart_assurance")
+phase9 = _load_sibling(
+    "r6_phase9_baseline_check.py", "r6_phase9_for_multistart_assurance")
+phase9f = _load_sibling(
+    "r6_phase9f_roll_aware_optimisation.py", "r6_phase9f_for_multistart_assurance")
+
+
+def _positive_float(text):
+    value = float(text)
+    if not math.isfinite(value) or value <= 0.0:
+        raise argparse.ArgumentTypeError("value must be finite and positive")
+    return value
+
+
+def _positive_int(text):
+    value = int(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return value
+
+
+def build_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "reference_controls_csv", type=Path,
+        help="reviewed roll-aware controls used as the current-best start",
+    )
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--max-roll-rate-radps", type=_positive_float, default=0.8)
+    parser.add_argument("--max-evaluations", type=_positive_int, default=2500)
+    parser.add_argument("--max-sweeps", type=_positive_int, default=20)
+    parser.add_argument("--initial-step-m", type=_positive_float, default=1.0)
+    parser.add_argument("--workers", type=_positive_int, default=1)
+    parser.add_argument("--speed-backend", choices=("python", "numba"), default="python")
+    parser.add_argument(
+        "--ranking-spacing-m", type=float, choices=RANKING_SPACINGS_M,
+        default=DEFAULT_RANKING_SPACING_M,
+    )
+    parser.add_argument(
+        "--perturbation-amplitude-m", type=_positive_float,
+        default=DEFAULT_PERTURBATION_AMPLITUDE_M,
+    )
+    parser.add_argument(
+        "--reuse-existing", action="store_true",
+        help="reuse strict final-controls CSVs already present in output_dir instead of rerunning those starts",
+    )
+    return parser
+
+
+def bounded_smooth_perturbation(
+        base_controls_m, control_s_m, lap_length_m,
+        lower_bounds_m, upper_bounds_m, amplitude_m, direction):
+    """Return a deterministic low-frequency perturbation that remains in bounds."""
+    base = np.asarray(base_controls_m, dtype=float)
+    stations = np.asarray(control_s_m, dtype=float)
+    lower = np.asarray(lower_bounds_m, dtype=float)
+    upper = np.asarray(upper_bounds_m, dtype=float)
+    if base.shape != stations.shape or lower.shape != base.shape or upper.shape != base.shape:
+        raise ValueError("controls, stations and bounds must have identical shapes")
+    if (base.ndim != 1 or len(base) == 0
+            or not np.all(np.isfinite(base))
+            or not np.all(np.isfinite(stations))
+            or not np.all(np.isfinite(lower))
+            or not np.all(np.isfinite(upper))):
+        raise ValueError("controls, stations and bounds must be non-empty finite 1D arrays")
+    if not math.isfinite(lap_length_m) or lap_length_m <= 0.0:
+        raise ValueError("lap length must be finite and positive")
+    if not math.isfinite(amplitude_m) or amplitude_m <= 0.0:
+        raise ValueError("perturbation amplitude must be finite and positive")
+    if direction not in (-1, 1):
+        raise ValueError("direction must be -1 or +1")
+    if np.any(lower > upper) or np.any(base < lower) or np.any(base > upper):
+        raise ValueError("base controls must lie within valid bounds")
+
+    phase = 2.0 * math.pi * stations / lap_length_m
+    wave = np.sin(phase + 0.35) + 0.45 * np.sin(3.0 * phase - 0.7)
+    peak = float(np.max(np.abs(wave)))
+    if peak == 0.0:
+        raise RuntimeError("deterministic perturbation unexpectedly has zero amplitude")
+    desired = direction * amplitude_m * wave / peak
+    available = np.where(desired >= 0.0, upper - base, base - lower)
+    scale = np.ones_like(desired)
+    nonzero = np.abs(desired) > 0.0
+    scale[nonzero] = np.minimum(1.0, available[nonzero] / np.abs(desired[nonzero]))
+    candidate = base + desired * scale
+    return np.clip(candidate, lower, upper)
+
+
+def backoff_to_feasible(proposed_controls_m, fallback_controls_m, feasibility_check):
+    """Move deterministically toward a known-feasible fallback until accepted."""
+    proposed = np.asarray(proposed_controls_m, dtype=float)
+    fallback = np.asarray(fallback_controls_m, dtype=float)
+    if proposed.shape != fallback.shape or proposed.ndim != 1 or len(proposed) == 0:
+        raise ValueError("proposed and fallback controls must be equal non-empty 1D arrays")
+    if not np.all(np.isfinite(proposed)) or not np.all(np.isfinite(fallback)):
+        raise ValueError("proposed and fallback controls must be finite")
+    for scale in BACKOFF_SCALES:
+        candidate = fallback + scale * (proposed - fallback)
+        if feasibility_check(candidate):
+            return candidate, scale
+    raise RuntimeError("fallback controls were unexpectedly infeasible")
+
+
+def build_starting_controls(
+        track, stations, lower, upper, frozen_controls, reference_controls,
+        perturbation_amplitude_m):
+    """Return the fixed Phase 11A starting set in deterministic order.
+
+    The two smooth perturbations are based on the centreline rather than the
+    boundary-using reviewed optimum. Pointwise control bounds alone do not
+    guarantee that the interpolated spline remains inside the track between
+    guides, so main() also performs an explicit spline-feasibility backoff.
+    """
+    centreline = np.clip(np.zeros_like(stations, dtype=float), lower, upper)
+    starts = (
+        ("reviewed_roll_aware", np.asarray(reference_controls, dtype=float).copy()),
+        ("frozen_phase8", np.asarray(frozen_controls, dtype=float).copy()),
+        ("centreline", centreline.copy()),
+        (
+            "centreline_perturb_plus",
+            bounded_smooth_perturbation(
+                centreline, stations, track.total_length_m,
+                lower, upper, perturbation_amplitude_m, +1),
+        ),
+        (
+            "centreline_perturb_minus",
+            bounded_smooth_perturbation(
+                centreline, stations, track.total_length_m,
+                lower, upper, perturbation_amplitude_m, -1),
+        ),
+    )
+    return starts
+
+
+def rank_candidates(rows):
+    """Return a stable ascending common-grid ranking without hiding ties."""
+    return sorted(rows, key=lambda row: (row["common_grid_lap_s"], row["start_name"]))
+
+
+def convergence_spread_interpretation(rows):
+    """Classify spread only when termination metadata is available for every run."""
+    if any(row["run_source"] != "optimised" for row in rows):
+        return None, (
+            "termination metadata unavailable for reused controls; common-grid spread alone "
+            "does not establish local-optimum sensitivity"
+        )
+    unfinished = [
+        row for row in rows
+        if row["termination_reason"] == "maximum evaluations reached"
+        and isinstance(row["final_step_m"], (int, float))
+        and float(row["final_step_m"]) > 0.125
+    ]
+    if unfinished:
+        return len(unfinished), (
+            "search-budget/convergence spread; do not treat as local-optimum uncertainty"
+        )
+    return 0, (
+        "all optimised starts reached comparable fine search steps; spread is more informative "
+        "about local-optimum sensitivity"
+    )
+
+
+def summary_filename(reuse_existing):
+    """Keep reuse-only summaries separate from optimisation-run provenance."""
+    return (
+        "phase11a_multistart_summary_reused.csv"
+        if reuse_existing else "phase11a_multistart_summary.csv"
+    )
+
+
+def _raw_evaluation(track, bike, stations, controls, spacing):
+    return evaluate_planar_racing_line(
+        controls, track, bike, stations,
+        sample_spacing_m=spacing,
+        boundary_margin_m=phase9.BOUNDARY_MARGIN_M,
+        boundary_check_spacing_m=phase9.BOUNDARY_CHECK_SPACING_M,
+        speed_backend="python",
+    )
+
+
+def _evaluate_controls(track, bike, stations, controls, spacing):
+    evaluation = _raw_evaluation(track, bike, stations, controls, spacing)
+    if not evaluation.feasible or evaluation.smooth_line is None or evaluation.speed_profile is None:
+        raise RuntimeError(
+            f"candidate controls are infeasible at {spacing:.2f} m: {evaluation.failure_reason}")
+    return evaluation
+
+
+def _controls_feasible_at_spacings(track, bike, stations, controls, spacings):
+    for spacing in spacings:
+        evaluation = _raw_evaluation(track, bike, stations, controls, spacing)
+        if (not evaluation.feasible
+                or evaluation.smooth_line is None
+                or evaluation.speed_profile is None):
+            return False
+    return True
+
+
+def _write_summary(path, rows):
+    fields = (
+        "rank", "start_name", "run_source", "start_feasibility_scale",
+        "optimisation_initial_lap_s", "optimisation_final_lap_s",
+        "common_grid_lap_s", "common_grid_delta_to_best_s", "evaluations", "sweeps",
+        "final_step_m", "termination_reason", "minimum_boundary_clearance_m",
+        "maximum_abs_control_delta_to_best_m", "rms_control_delta_to_best_m",
+        "output_controls_csv",
+    )
+    with Path(path).open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row[field] for field in fields})
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    phase9f._require_canonical_inputs()
+
+    track = Track.from_yaml(phase9.DEFAULT_TRACK)
+    base_bike = load_motorcycle_config(phase9.DEFAULT_MOTORCYCLE)
+    if base_bike.handling is not None:
+        raise RuntimeError("canonical R6 baseline unexpectedly has handling enabled")
+    bike = replace(
+        base_bike, handling=HandlingConfig(max_roll_rate_radps=args.max_roll_rate_radps))
+
+    stations = generate_planar_control_stations(track, REFERENCE_PLANAR_CONTROL_POLICY)
+    lower, upper = planar_control_bounds(track, stations, phase9.BOUNDARY_MARGIN_M)
+    frozen_controls = phase9.load_frozen_controls(
+        phase9.DEFAULT_CONTROLS, stations, lower, upper)
+    reference_controls = phase8.load_initial_controls_csv(
+        args.reference_controls_csv, stations, lower, upper)
+
+    proposed_starts = build_starting_controls(
+        track, stations, lower, upper, frozen_controls, reference_controls,
+        args.perturbation_amplitude_m,
+    )
+    centreline = proposed_starts[2][1]
+    checked_spacings = tuple(sorted({1.0, args.ranking_spacing_m}))
+    starts = []
+    for start_name, proposed_controls in proposed_starts:
+        check = lambda controls: _controls_feasible_at_spacings(
+            track, bike, stations, controls, checked_spacings)
+        if start_name.startswith("centreline_perturb_"):
+            initial_controls, feasibility_scale = backoff_to_feasible(
+                proposed_controls, centreline, check)
+            if feasibility_scale == 0.0:
+                raise RuntimeError(
+                    f"{start_name} collapses to the centreline after feasibility backoff")
+        else:
+            initial_controls = proposed_controls
+            feasibility_scale = 1.0
+            if not check(initial_controls):
+                raise RuntimeError(
+                    f"fixed start {start_name} is infeasible on one of {checked_spacings}")
+        starts.append((start_name, initial_controls, feasibility_scale))
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    config = PlanarOptimisationConfig(
+        initial_step_m=args.initial_step_m,
+        max_sweeps=args.max_sweeps,
+        max_evaluations=args.max_evaluations,
+        boundary_margin_m=phase9.BOUNDARY_MARGIN_M,
+        boundary_check_spacing_m=phase9.BOUNDARY_CHECK_SPACING_M,
+        optimisation_sample_spacing_m=1.0,
+        parallel_workers=args.workers,
+        speed_backend=args.speed_backend,
+    )
+
+    print(f"reference_controls_csv={args.reference_controls_csv}")
+    print(f"reference_controls_sha256={phase9.sha256_file(args.reference_controls_csv)}")
+    print(f"max_roll_rate_radps={args.max_roll_rate_radps:.9f}")
+    print("scenario_note=finite roll rate is a sensitivity scenario, not a calibrated R6/rider constant")
+    print(f"start_count={len(starts)}")
+    print(f"max_evaluations_per_start={args.max_evaluations}")
+    print(f"max_sweeps_per_start={args.max_sweeps}")
+    print(f"initial_step_m={args.initial_step_m:.9f}")
+    print(f"workers={args.workers}")
+    print(f"speed_backend={args.speed_backend}")
+    print(f"common_ranking_spacing_m={args.ranking_spacing_m:.2f}")
+    print(f"perturbation_amplitude_m={args.perturbation_amplitude_m:.9f}")
+    print(f"reuse_existing={str(args.reuse_existing).lower()}")
+    for start_name, _, feasibility_scale in starts:
+        print(f"start_feasibility_scale_{start_name}={feasibility_scale:.6f}")
+
+    rows = []
+    final_controls = {}
+    for start_name, initial_controls, feasibility_scale in starts:
+        initial_common = _evaluate_controls(
+            track, bike, stations, initial_controls, args.ranking_spacing_m)
+        initial_optimisation_grid = _evaluate_controls(
+            track, bike, stations, initial_controls, 1.0)
+        output_controls = args.output_dir / f"{start_name}_final_controls.csv"
+
+        if args.reuse_existing and output_controls.exists():
+            final = phase8.load_initial_controls_csv(
+                output_controls, stations, lower, upper)
+            final_optimisation_grid = _evaluate_controls(
+                track, bike, stations, final, 1.0)
+            common = _evaluate_controls(
+                track, bike, stations, final, args.ranking_spacing_m)
+            final_controls[start_name] = np.asarray(final, dtype=float).copy()
+            rows.append({
+                "start_name": start_name,
+                "run_source": "reused_existing_controls",
+                "start_feasibility_scale": feasibility_scale,
+                "optimisation_initial_lap_s": initial_optimisation_grid.lap_time_s,
+                "optimisation_final_lap_s": final_optimisation_grid.lap_time_s,
+                "common_grid_initial_lap_s": initial_common.lap_time_s,
+                "common_grid_lap_s": common.lap_time_s,
+                "evaluations": "",
+                "sweeps": "",
+                "final_step_m": "",
+                "termination_reason": "reused existing final controls",
+                "minimum_boundary_clearance_m": "",
+                "elapsed_s": 0.0,
+                "output_controls_csv": str(output_controls),
+            })
+            print(
+                f"start={start_name} run_source=reused_existing_controls "
+                f"common_grid_initial_lap_s={initial_common.lap_time_s:.9f} "
+                f"optimisation_initial_lap_s={initial_optimisation_grid.lap_time_s:.9f} "
+                f"optimisation_final_lap_s={final_optimisation_grid.lap_time_s:.9f} "
+                f"common_grid_final_lap_s={common.lap_time_s:.9f}")
+            continue
+
+        started = time.perf_counter()
+        result = optimise_planar_racing_line(
+            track, bike, REFERENCE_PLANAR_CONTROL_POLICY, config,
+            initial_controls_m=initial_controls,
+        )
+        elapsed = time.perf_counter() - started
+        phase8.atomic_write_controls_csv(
+            output_controls, result.control_s_m, result.best_controls_m,
+            result.lower_bounds_m, result.upper_bounds_m)
+        common = _evaluate_controls(
+            track, bike, stations, result.best_controls_m, args.ranking_spacing_m)
+        final_controls[start_name] = np.asarray(result.best_controls_m, dtype=float).copy()
+        rows.append({
+            "start_name": start_name,
+            "run_source": "optimised",
+            "start_feasibility_scale": feasibility_scale,
+            "optimisation_initial_lap_s": result.initial_lap_time_s,
+            "optimisation_final_lap_s": result.best_lap_time_s,
+            "common_grid_initial_lap_s": initial_common.lap_time_s,
+            "common_grid_lap_s": common.lap_time_s,
+            "evaluations": result.evaluations,
+            "sweeps": result.sweeps,
+            "final_step_m": result.final_step_m,
+            "termination_reason": result.termination_reason,
+            "minimum_boundary_clearance_m": result.minimum_boundary_clearance_m,
+            "elapsed_s": elapsed,
+            "output_controls_csv": str(output_controls),
+        })
+        print(
+            f"start={start_name} run_source=optimised "
+            f"common_grid_initial_lap_s={initial_common.lap_time_s:.9f} "
+            f"optimisation_initial_lap_s={result.initial_lap_time_s:.9f} "
+            f"optimisation_final_lap_s={result.best_lap_time_s:.9f} "
+            f"common_grid_final_lap_s={common.lap_time_s:.9f} "
+            f"evaluations={result.evaluations} sweeps={result.sweeps} "
+            f"final_step_m={result.final_step_m:.9f} "
+            f"termination={result.termination_reason!r} elapsed_s={elapsed:.3f}")
+
+    ranked = rank_candidates(rows)
+    best = ranked[0]
+    best_controls = final_controls[best["start_name"]]
+    best_lap = float(best["common_grid_lap_s"])
+    for rank, row in enumerate(ranked, start=1):
+        delta_controls = final_controls[row["start_name"]] - best_controls
+        row["rank"] = rank
+        row["common_grid_delta_to_best_s"] = float(row["common_grid_lap_s"] - best_lap)
+        row["maximum_abs_control_delta_to_best_m"] = float(np.max(np.abs(delta_controls)))
+        row["rms_control_delta_to_best_m"] = float(np.sqrt(np.mean(delta_controls ** 2)))
+
+    print("common_grid_ranking:")
+    for row in ranked:
+        print(
+            f"  rank={row['rank']} start={row['start_name']} "
+            f"lap_s={row['common_grid_lap_s']:.9f} "
+            f"delta_to_best_s={row['common_grid_delta_to_best_s']:.9f} "
+            f"max_control_delta_to_best_m={row['maximum_abs_control_delta_to_best_m']:.6f} "
+            f"rms_control_delta_to_best_m={row['rms_control_delta_to_best_m']:.6f}")
+
+    spread = float(ranked[-1]["common_grid_lap_s"] - best_lap)
+    unfinished_count, spread_interpretation = convergence_spread_interpretation(rows)
+    print(f"common_grid_best_start={best['start_name']}")
+    print(f"common_grid_best_lap_s={best_lap:.9f}")
+    print(f"common_grid_search_budget_spread_s={spread:.9f}")
+    if unfinished_count is None:
+        print("unfinished_coarse_step_runs=not_available")
+    else:
+        print(f"unfinished_coarse_step_runs={unfinished_count}")
+    print(f"spread_interpretation={spread_interpretation}")
+    print("interpretation_note=this is a bounded multistart screening diagnostic, not proof of a global optimum; poor generic-start convergence should first motivate hierarchical coarse-to-fine warm-starting before a new optimiser algorithm")
+    print("calibration_note=no motorcycle, rider, track, or roll-rate parameter is fitted by this command")
+
+    summary_csv = args.output_dir / summary_filename(args.reuse_existing)
+    _write_summary(summary_csv, ranked)
+    print(f"summary_csv={summary_csv}")
+
+
+if __name__ == "__main__":
+    main()
