@@ -27,6 +27,9 @@ class RigidRegistrationResult:
     match: TrackMatchResult
     inlier_mask: BoolArray
     iterations: int
+    converged: bool
+    final_translation_delta_m: float
+    final_bearing_delta_rad: float
     rms_residual_m: float
     median_residual_m: float
     p95_residual_m: float
@@ -86,6 +89,9 @@ def fit_rigid_registration(
     exclusions.  ``trim_fraction`` then provides additional robustness against
     transient position errors and imperfect track/reference correspondence.
     Neither mechanism changes scale or silently repairs the source trajectory.
+
+    The returned convergence fields are explicit because a plausible transform
+    at ``max_iterations`` is not evidence that the iterative fit has settled.
     """
     east = np.asarray(east_m, dtype=float)
     north = np.asarray(north_m, dtype=float)
@@ -112,6 +118,9 @@ def fit_rigid_registration(
     final_match = None
     final_inliers = None
     iterations = 0
+    converged = False
+    translation_delta = math.inf
+    bearing_delta = math.inf
 
     for iterations in range(1, max_iterations + 1):
         x, y = transform.world_to_local(east, north)
@@ -143,6 +152,7 @@ def fit_rigid_registration(
         final_inliers = inliers
         if (translation_delta <= convergence_translation_m
                 and bearing_delta <= convergence_bearing_rad):
+            converged = True
             break
 
     x, y = transform.world_to_local(east, north)
@@ -165,6 +175,9 @@ def fit_rigid_registration(
         match=final_match,
         inlier_mask=final_inliers,
         iterations=iterations,
+        converged=converged,
+        final_translation_delta_m=float(translation_delta),
+        final_bearing_delta_rad=float(bearing_delta),
         rms_residual_m=rms,
         median_residual_m=float(np.median(residuals)),
         p95_residual_m=float(np.percentile(residuals, 95.0)),
