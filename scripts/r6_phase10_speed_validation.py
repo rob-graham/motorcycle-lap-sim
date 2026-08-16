@@ -8,12 +8,12 @@ and compares that profile with the post-registration measured speed envelope.
 import argparse
 import csv
 import hashlib
+import importlib.util
 import math
 from pathlib import Path
 
 import numpy as np
 
-import r6_phase9_baseline_check as phase9
 from motorcycle_lap_sim.telemetry import (
     compare_speed_envelope,
     summarize_speed_comparison,
@@ -28,6 +28,26 @@ REQUIRED_ENVELOPE_COLUMNS = (
     "speed_p10_mps",
     "speed_p90_mps",
 )
+
+
+def _load_phase9_module():
+    """Load the sibling Phase 9 baseline command without relying on sys.path.
+
+    Normal command execution places ``scripts/`` on ``sys.path``, but tests and
+    other tooling may load this file through ``importlib``.  Resolving the
+    sibling by ``__file__`` keeps both modes deterministic without mutating the
+    process import path.
+    """
+    path = Path(__file__).resolve().with_name("r6_phase9_baseline_check.py")
+    spec = importlib.util.spec_from_file_location("r6_phase9_baseline_check_for_speed_validation", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load Phase 9 baseline module from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+phase9 = _load_phase9_module()
 
 
 def build_parser():
