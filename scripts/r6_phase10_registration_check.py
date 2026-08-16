@@ -116,6 +116,26 @@ def _print_heading_summary(headings_rad, peer_deviation_m, quality, indices, bin
             f"speed_accuracy_median_mps={np.nanmedian(quality.speed_accuracy_mps[source]):.9f}")
 
 
+def _flag_runs(mask):
+    values = np.asarray(mask, dtype=bool)
+    starts = np.flatnonzero(values & np.r_[True, ~values[:-1]])
+    stops = np.flatnonzero(values & np.r_[~values[1:], True])
+    return tuple(zip(starts, stops))
+
+
+def _bin_run_edges(chainage_m, start_index, stop_index, total_length_m):
+    chainage = np.asarray(chainage_m, dtype=float)
+    if start_index == 0:
+        lower = 0.0
+    else:
+        lower = 0.5 * (chainage[start_index - 1] + chainage[start_index])
+    if stop_index == len(chainage) - 1:
+        upper = total_length_m
+    else:
+        upper = 0.5 * (chainage[stop_index] + chainage[stop_index + 1])
+    return float(lower), float(upper)
+
+
 def _corridor_diagnostics(track, offset_envelope):
     """Compare the measured envelope with nominal model widths without correcting either."""
     reference = sample_track_stations(track, offset_envelope.chainage_m)
@@ -140,6 +160,16 @@ def _corridor_diagnostics(track, offset_envelope):
           f"{np.count_nonzero(percentile_fully_outside)}/{len(median)}")
     print(f"maximum_median_model_corridor_excess_m={median_excess[worst]:.9f}")
     print(f"maximum_median_model_corridor_excess_chainage_m={offset_envelope.chainage_m[worst]:.9f}")
+    for label, mask in (
+            ("median_outside_model_corridor_sector_m", median_outside),
+            ("p10_p90_fully_outside_model_corridor_sector_m", percentile_fully_outside)):
+        for start, stop in _flag_runs(mask):
+            lower, upper = _bin_run_edges(
+                offset_envelope.chainage_m, start, stop, track.total_length_m)
+            local_worst = start + int(np.argmax(median_excess[start:stop + 1]))
+            print(f"{label}={lower:.3f}:{upper:.3f} bins={stop - start + 1} "
+                  f"maximum_median_excess_m={median_excess[local_worst]:.6f} "
+                  f"at_chainage_m={offset_envelope.chainage_m[local_worst]:.3f}")
     print("corridor_note=consistent measured offsets beyond nominal model width indicate local reference-geometry mismatch, not automatic rider off-track classification")
     return reference, median_excess, percentile_touches_outside
 
