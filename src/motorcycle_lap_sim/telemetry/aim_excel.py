@@ -39,9 +39,14 @@ def load_aim_workbook(path, *, sheet_name="Updated") -> TelemetrySession:
     """Load an AiM-derived Excel sheet with cached formulas and convert to SI.
 
     The supplied project workbook has a human-readable header row followed by a
-    unit row.  `data_only=True` deliberately consumes the workbook's cached
+    unit row. `data_only=True` deliberately consumes the workbook's cached
     east/north formula values; the importer does not recalculate or silently
     reinterpret the workbook's coordinate conversion.
+
+    The raw `ECU GEAR` channel is preserved as floating point because the
+    supplied AiM workbook contains interpolated fractional values during gear
+    transitions. Stable integer gear classification belongs in later telemetry
+    cleaning/validation rather than the file importer.
     """
     try:
         from openpyxl import load_workbook
@@ -105,7 +110,7 @@ def load_aim_workbook(path, *, sheet_name="Updated") -> TelemetrySession:
         pitch_rate_radps.append(math.radians(_number(value("PitchRate"))))
         yaw_rate_radps.append(math.radians(_number(value("YawRate"))))
         engine_rpm.append(_number(value("ECU RPM")))
-        gear_number.append(_integer(value("ECU GEAR")))
+        gear_number.append(_number(value("ECU GEAR")))
         ecu_throttle_rad.append(math.radians(_number(value("ECU THROTTLE"))))
         hand_throttle_fraction.append(_number(value("ECU TPS HAND")) / 100.0)
         distance_from_start_m.append(_number(value("Dist from Start")))
@@ -119,7 +124,6 @@ def load_aim_workbook(path, *, sheet_name="Updated") -> TelemetrySession:
         array(time_s), array(distance_m), array(east_m), array(north_m), array(speed_mps),
         array(lateral_mps2), array(longitudinal_mps2), array(slope_rad), array(heading_rad),
         array(gps_gyro_radps), array(latitude_deg), array(longitude_deg), array(roll_rate_radps),
-        array(pitch_rate_radps), array(yaw_rate_radps), array(engine_rpm),
-        np.asarray(gear_number, dtype=np.int64), array(ecu_throttle_rad),
-        array(hand_throttle_fraction), array(distance_from_start_m),
+        array(pitch_rate_radps), array(yaw_rate_radps), array(engine_rpm), array(gear_number),
+        array(ecu_throttle_rad), array(hand_throttle_fraction), array(distance_from_start_m),
         np.asarray(lap_ids, dtype=np.int64), tuple(markers), sheet_name)
