@@ -234,6 +234,36 @@ def _print_speed_summary(label, lap_time_s, summary):
     print(f"{label}_below_measured_p10_bins={summary.below_p10_bins}/{summary.eligible_bins}")
 
 
+def _offset_summary(envelope, sampled_case, eligible):
+    selected = np.flatnonzero(eligible)
+    if len(selected) == 0:
+        raise RuntimeError("no complete measured lateral-offset bins are available")
+    simulated = sampled_case["lateral_offset_m"]
+    median = envelope["offset_median_m"]
+    p10 = envelope["offset_p10_m"]
+    p90 = envelope["offset_p90_m"]
+    error = simulated - median
+    absolute = np.abs(error)
+    return {
+        "mean_bias_m": float(np.mean(error[selected])),
+        "mae_m": float(np.mean(absolute[selected])),
+        "rms_m": float(np.sqrt(np.mean(error[selected] ** 2))),
+        "within": int(np.count_nonzero(eligible & (simulated >= p10) & (simulated <= p90))),
+        "above": int(np.count_nonzero(eligible & (simulated > p90))),
+        "below": int(np.count_nonzero(eligible & (simulated < p10))),
+        "absolute_error_m": absolute,
+    }
+
+
+def _print_offset_summary(label, summary, eligible_count):
+    print(f"{label}_mean_sim_minus_measured_offset_m={summary['mean_bias_m']:.9f}")
+    print(f"{label}_mean_absolute_offset_error_m={summary['mae_m']:.9f}")
+    print(f"{label}_rms_offset_error_m={summary['rms_m']:.9f}")
+    print(f"{label}_within_measured_offset_p10_p90_bins={summary['within']}/{eligible_count}")
+    print(f"{label}_above_measured_offset_p90_bins={summary['above']}/{eligible_count}")
+    print(f"{label}_below_measured_offset_p10_bins={summary['below']}/{eligible_count}")
+
+
 def _write_csv(path, envelope, sampled, eligible_speed, eligible_offset):
     fields = (
         "chainage_m",
@@ -251,6 +281,7 @@ def _write_csv(path, envelope, sampled, eligible_speed, eligible_offset):
         "frozen_roll_binding", "roll_aware_roll_binding",
         "ideal_minus_measured_speed_mps", "frozen_roll_minus_measured_speed_mps",
         "roll_aware_minus_measured_speed_mps",
+        "ideal_minus_measured_offset_m", "roll_aware_minus_measured_offset_m",
     )
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -261,6 +292,7 @@ def _write_csv(path, envelope, sampled, eligible_speed, eligible_offset):
             speed_ok = bool(eligible_speed[index])
             offset_ok = bool(eligible_offset[index])
             measured_speed = envelope["speed_median_mps"][index]
+            measured_offset = envelope["offset_median_m"][index]
             ideal_speed = sampled["ideal"]["speed_mps"][index]
             frozen_roll_speed = sampled["frozen_roll"]["speed_mps"][index]
             roll_aware_speed = sampled["roll_aware"]["speed_mps"][index]
@@ -271,8 +303,8 @@ def _write_csv(path, envelope, sampled, eligible_speed, eligible_offset):
                 int(speed_ok), int(offset_ok),
                 measured_speed,
                 envelope["speed_p10_mps"][index], envelope["speed_p90_mps"][index],
-                envelope["offset_median_m"][index], envelope["offset_p10_m"][index],
-                envelope["offset_p90_m"][index],
+                measured_offset,
+                envelope["offset_p10_m"][index], envelope["offset_p90_m"][index],
                 ideal_speed, frozen_roll_speed, roll_aware_speed,
                 ideal_offset, roll_aware_offset, roll_aware_offset - ideal_offset,
                 sampled["ideal"]["curvature_1pm"][index],
@@ -290,6 +322,8 @@ def _write_csv(path, envelope, sampled, eligible_speed, eligible_offset):
                 ideal_speed - measured_speed if speed_ok else "",
                 frozen_roll_speed - measured_speed if speed_ok else "",
                 roll_aware_speed - measured_speed if speed_ok else "",
+                ideal_offset - measured_offset if offset_ok else "",
+                roll_aware_offset - measured_offset if offset_ok else "",
             ))
 
 
@@ -348,6 +382,7 @@ def main(argv=None):
     eligible_offset &= np.isfinite(envelope["offset_median_m"])
     eligible_offset &= np.isfinite(envelope["offset_p10_m"])
     eligible_offset &= np.isfinite(envelope["offset_p90_m"])
+    eligible_offset_count = int(np.count_nonzero(eligible_offset))
 
     print(f"envelope_csv={args.envelope_csv}")
     print(f"envelope_sha256={envelope_hash}")
@@ -357,7 +392,7 @@ def main(argv=None):
     print("scenario_note=finite roll rate is a sensitivity scenario, not a calibrated R6/rider constant")
     print(f"sim_spacing_m={args.sim_spacing_m:.2f}")
     print(f"eligible_complete_speed_bins={eligible_count}/{len(eligible_speed)}")
-    print(f"eligible_complete_offset_bins={np.count_nonzero(eligible_offset)}/{len(eligible_offset)}")
+    print(f"eligible_complete_offset_bins={eligible_offset_count}/{len(eligible_offset)}")
     for name in ("ideal", "frozen_roll", "roll_aware"):
         _print_speed_summary(name, evaluations[name].lap_time_s, summaries[name])
 
@@ -373,11 +408,30 @@ def main(argv=None):
     print("mean_absolute_error_change_roll_aware_minus_frozen_roll_mps="
           f"{np.mean(roll_aware_error[eligible_indices] - frozen_error[eligible_indices]):.9f}")
 
+    ideal_offset_summary = _offset_summary(envelope, sampled["ideal"], eligible_offset)
+    roll_aware_offset_summary = _offset_summary(envelope, sampled["roll_aware"], eligible_offset)
+    _print_offset_summary("ideal", ideal_offset_summary, eligible_offset_count)
+    _print_offset_summary("roll_aware", roll_aware_offset_summary, eligible_offset_count)
+    roll_aware_offset_closer = eligible_offset & (
+        roll_aware_offset_summary["absolute_error_m"]
+        < ideal_offset_summary["absolute_error_m"])
+    roll_aware_offset_farther = eligible_offset & (
+        roll_aware_offset_summary["absolute_error_m"]
+        > ideal_offset_summary["absolute_error_m"])
+    offset_indices = np.flatnonzero(eligible_offset)
+    print("roll_aware_offset_closer_to_measured_median_bins="
+          f"{np.count_nonzero(roll_aware_offset_closer)}/{eligible_offset_count}")
+    print("roll_aware_offset_farther_from_measured_median_bins="
+          f"{np.count_nonzero(roll_aware_offset_farther)}/{eligible_offset_count}")
+    print("mean_absolute_offset_error_change_roll_aware_minus_ideal_m="
+          f"{np.mean(roll_aware_offset_summary['absolute_error_m'][offset_indices] - ideal_offset_summary['absolute_error_m'][offset_indices]):.9f}")
+
     offset_change = sampled["roll_aware"]["lateral_offset_m"] - sampled["ideal"]["lateral_offset_m"]
     worst_offset_index = int(np.argmax(np.abs(offset_change)))
     print(f"maximum_abs_line_offset_change_m={abs(offset_change[worst_offset_index]):.9f}")
     print(f"maximum_abs_line_offset_change_chainage_m={envelope['chainage_m'][worst_offset_index]:.9f}")
     print(f"rms_line_offset_change_m={np.sqrt(np.mean(offset_change ** 2)):.9f}")
+    print("offset_comparison_note=measured lateral offsets inherit the nominal reference-track geometry; known local reference mismatch can dominate absolute offset error, so these metrics are diagnostic rather than calibration targets")
     print("comparison_note=nominal track chainage is the common coordinate; measured and simulated lines differ geometrically and local reference-geometry error remains possible")
     print("calibration_note=no motorcycle, rider, track, or registration parameters are tuned by this command")
 
