@@ -18,7 +18,7 @@ def test_periodic_interpolation_wraps_across_start_finish():
     source_s = np.array([0.0, 25.0, 50.0, 75.0])
     source_v = np.array([10.0, 20.0, 30.0, 40.0])
     values = periodic_interpolate(source_s, source_v, [-5.0, 5.0, 95.0, 105.0], 100.0)
-    assert np.allclose(values, [34.0, 12.0, 16.0, 12.0])
+    assert np.allclose(values, [16.0, 12.0, 16.0, 12.0])
 
 
 def test_compare_speed_envelope_uses_only_complete_lap_bins():
