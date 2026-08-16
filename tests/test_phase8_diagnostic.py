@@ -16,6 +16,7 @@ selected_tracks = SCRIPT["selected_tracks"]
 half_lap_symmetry_differences = SCRIPT["half_lap_symmetry_differences"]
 optimisation_config = SCRIPT["optimisation_config"]
 load_initial_controls_csv = SCRIPT["load_initial_controls_csv"]
+atomic_write_controls_csv = SCRIPT["atomic_write_controls_csv"]
 run_selected_optimisation = SCRIPT["run_selected_optimisation"]
 metrics = SCRIPT["metrics"]
 EXTRA_FINE_POLICY = SCRIPT["EXTRA_FINE_POLICY"]
@@ -69,6 +70,12 @@ def test_parser_accepts_initial_controls_csv():
     assert args.initial_controls_csv == Path("saved.csv")
 
 
+def test_parser_accepts_checkpoint_controls_csv():
+    args = build_parser().parse_args(("--track", "mallala", "--policy", "reference",
+                                      "--checkpoint-controls-csv", "checkpoint.csv"))
+    assert args.checkpoint_controls_csv == Path("checkpoint.csv")
+
+
 def test_initial_step_cli_is_passed_to_optimisation_config():
     args = build_parser().parse_args(("--initial-step-m", "0.25"))
 
@@ -100,6 +107,35 @@ def test_valid_controls_csv_loads(tmp_path):
     write_controls(path)
     loaded = load_initial_controls_csv(path, [0.0, 10.0], [-2.0, -2.0], [2.0, 2.0])
     assert np.array_equal(loaded, [1.0, -1.0])
+
+
+def test_atomic_checkpoint_replaces_previous_file_and_loads_strictly(tmp_path):
+    path = tmp_path / "checkpoint.csv"
+    stations = np.array([0.0, 10.0])
+    lower, upper = np.full(2, -2.0), np.full(2, 2.0)
+    atomic_write_controls_csv(path, stations, np.array([1.0, -1.0]), lower, upper)
+    first = path.read_text(encoding="utf-8")
+    atomic_write_controls_csv(path, stations, np.array([0.5, -0.5]), lower, upper)
+
+    assert path.read_text(encoding="utf-8") != first
+    assert np.array_equal(load_initial_controls_csv(path, stations, lower, upper),
+                          [0.5, -0.5])
+    assert list(tmp_path.glob(".checkpoint.csv.*.tmp")) == []
+
+
+def test_atomic_checkpoint_failure_preserves_target_and_cleans_temporary(monkeypatch, tmp_path):
+    path = tmp_path / "checkpoint.csv"
+    path.write_text("previous complete checkpoint\n", encoding="utf-8")
+
+    def fail_replace(source, target):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(SCRIPT["os"], "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        atomic_write_controls_csv(path, [0.0], [1.0], [-2.0], [2.0])
+
+    assert path.read_text(encoding="utf-8") == "previous complete checkpoint\n"
+    assert list(tmp_path.glob(".checkpoint.csv.*.tmp")) == []
 
 
 @pytest.mark.parametrize("change,message", [

@@ -7,6 +7,7 @@ from .results import ObjectiveEvaluation, OptimisationResult
 from .planar import (COARSE_PLANAR_CONTROL_POLICY, FINE_PLANAR_CONTROL_POLICY,
                      REFERENCE_PLANAR_CONTROL_POLICY, PlanarControlStationPolicy,
                      PlanarObjectiveEvaluation, PlanarOptimisationConfig,
+                     PlanarOptimisationProgress,
                      PlanarOptimisationResult, evaluate_planar_racing_line,
                      generate_planar_control_stations, optimise_planar_racing_line,
                      planar_control_bounds, resample_planar_result)
@@ -16,6 +17,7 @@ __all__ = ["ObjectiveEvaluation", "OptimisationConfig", "OptimisationResult",
 
 __all__ += ["COARSE_PLANAR_CONTROL_POLICY", "FINE_PLANAR_CONTROL_POLICY",
             "REFERENCE_PLANAR_CONTROL_POLICY", "PlanarControlStationPolicy",
-            "PlanarObjectiveEvaluation", "PlanarOptimisationConfig", "PlanarOptimisationResult",
+            "PlanarObjectiveEvaluation", "PlanarOptimisationConfig", "PlanarOptimisationProgress",
+            "PlanarOptimisationResult",
             "evaluate_planar_racing_line", "generate_planar_control_stations",
             "optimise_planar_racing_line", "planar_control_bounds", "resample_planar_result"]

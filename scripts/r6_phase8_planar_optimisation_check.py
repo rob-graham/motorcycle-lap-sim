@@ -3,7 +3,9 @@
 import argparse
 import csv
 import math
+import os
 from pathlib import Path
+import tempfile
 import time
 
 import matplotlib.pyplot as plt
@@ -46,11 +48,15 @@ class RestartArgumentParser(argparse.ArgumentParser):
 
     def parse_args(self, args=None, namespace=None):
         parsed = super().parse_args(args, namespace)
-        if parsed.initial_controls_csv is not None:
+        if parsed.initial_controls_csv is not None or parsed.checkpoint_controls_csv is not None:
+            option = ("--initial-controls-csv" if parsed.initial_controls_csv is not None
+                      else "--checkpoint-controls-csv")
             if parsed.track == "both":
-                self.error("--initial-controls-csv requires --track oval or mallala, not both")
+                self.error(f"{option} requires --track oval or mallala, not both")
             if parsed.policy == "all":
-                self.error("--initial-controls-csv requires --policy coarse, reference, or fine, not all")
+                if parsed.initial_controls_csv is not None:
+                    self.error("--initial-controls-csv requires --policy coarse, reference, or fine, not all")
+                self.error("--checkpoint-controls-csv requires a single --policy, not all")
         return parsed
 
 
@@ -65,6 +71,7 @@ def build_parser():
     parser.add_argument("--policy", choices=("coarse", "reference", "fine", "extra-fine", "all"),
                         default="all")
     parser.add_argument("--initial-controls-csv", type=Path, default=None)
+    parser.add_argument("--checkpoint-controls-csv", type=Path, default=None)
     return parser
 
 
@@ -95,11 +102,13 @@ def half_lap_symmetry_differences(control_s_m, controls_m, lap_length_m):
     return controls[:half] - controls[half:]
 
 
-def timed_optimisation(track, bike, policy, config, initial_controls_m=None):
+def timed_optimisation(track, bike, policy, config, initial_controls_m=None,
+                       progress_callback=None):
     """Run and report wall-clock timing without affecting optimisation logic."""
     started = time.perf_counter()
     result = optimise_planar_racing_line(
-        track, bike, policy, config, initial_controls_m=initial_controls_m)
+        track, bike, policy, config, initial_controls_m=initial_controls_m,
+        progress_callback=progress_callback)
     elapsed = time.perf_counter() - started
     print(f"workers={config.parallel_workers}")
     print(f"speed_backend={config.speed_backend}")
@@ -164,6 +173,39 @@ def load_initial_controls_csv(path, control_s_m, lower_bounds_m, upper_bounds_m)
         index = int(np.flatnonzero(outside)[0])
         raise ValueError(f"initial controls CSV best_offset_m at index {index} is outside current bounds")
     return controls
+
+
+def atomic_write_controls_csv(path, stations, controls, lower, upper):
+    """Atomically write the strict same-policy warm-start controls format."""
+    path = Path(path)
+    temporary = None
+    try:
+        fd, temporary_name = tempfile.mkstemp(
+            dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        temporary = Path(temporary_name)
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(("index", "control_s_m", "best_offset_m",
+                             "lower_bound_m", "upper_bound_m"))
+            for index, values in enumerate(zip(stations, controls, lower, upper)):
+                writer.writerow((index, *values))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def checkpoint_callback(path, stations, lower, upper):
+    """Create the parent-process per-poll warm-start checkpoint callback."""
+    def checkpoint(progress):
+        atomic_write_controls_csv(path, stations, progress.best_controls_m, lower, upper)
+        print(f"checkpoint_controls_csv={path} checkpoint_lap_s={progress.lap_time_s:.9f} "
+              f"checkpoint_evaluations={progress.evaluations} "
+              f"checkpoint_sweeps={progress.sweeps} checkpoint_step_m={progress.step_m:.9f}")
+    return checkpoint
 
 
 def report_oval_symmetry(track, bike, policy, result, config):
@@ -281,8 +323,14 @@ def run_selected_optimisation(parser, args, track, bike, policy_name, policy,
             parser.error(str(exc))
         print(f"initial_controls_csv={args.initial_controls_csv}")
         print(f"initial_controls_count={len(initial_controls)}")
+    optional_callback = {}
+    if args.checkpoint_controls_csv is not None:
+        lower, upper = planar_control_bounds(track, stations, config.boundary_margin_m)
+        optional_callback["progress_callback"] = checkpoint_callback(
+            args.checkpoint_controls_csv, stations, lower, upper)
     result = timed_optimisation(
-        track, bike, policy, config, initial_controls_m=initial_controls)
+        track, bike, policy, config, initial_controls_m=initial_controls,
+        **optional_callback)
     metrics(policy_name, result, restarted=initial_controls is not None)
     return result
 

@@ -292,19 +292,30 @@ def test_spawn_parallel_poll_matches_serial_result_exactly():
     common = dict(max_sweeps=1, max_evaluations=30,
                   boundary_check_spacing_m=1,
                   optimisation_sample_spacing_m=2)
+    serial_progress, parallel_progress = [], []
     serial = optimise_planar_racing_line(
         track, bike(), policy,
-        PlanarOptimisationConfig(**common, parallel_workers=1))
+        PlanarOptimisationConfig(**common, parallel_workers=1),
+        progress_callback=serial_progress.append)
     parallel = optimise_planar_racing_line(
         track, bike(), policy,
-        PlanarOptimisationConfig(**common, parallel_workers=2))
+        PlanarOptimisationConfig(**common, parallel_workers=2),
+        progress_callback=parallel_progress.append)
 
     assert np.array_equal(serial.best_controls_m, parallel.best_controls_m)
     assert serial.best_lap_time_s == parallel.best_lap_time_s
     assert (serial.evaluations, serial.sweeps, serial.final_step_m,
             serial.termination_reason) == (
-                parallel.evaluations, parallel.sweeps, parallel.final_step_m,
-                parallel.termination_reason)
+        parallel.evaluations, parallel.sweeps, parallel.final_step_m,
+        parallel.termination_reason)
+    assert len(serial_progress) == len(parallel_progress) == 1
+    assert np.array_equal(serial_progress[0].best_controls_m,
+                          parallel_progress[0].best_controls_m)
+    assert serial_progress[0].lap_time_s == parallel_progress[0].lap_time_s
+    assert (serial_progress[0].evaluations, serial_progress[0].sweeps,
+            serial_progress[0].step_m) == (
+        parallel_progress[0].evaluations, parallel_progress[0].sweeps,
+        parallel_progress[0].step_m)
 
 
 def test_out_of_order_poll_completion_retains_candidate_tie_breaking():
@@ -333,3 +344,45 @@ def test_out_of_order_poll_completion_retains_candidate_tie_breaking():
     assert polls == 1
     # All candidates tie, so direction 0/sign 0 (+ first coordinate) wins.
     assert np.array_equal(result, np.array([1.0, 0.0, 0.0]))
+
+
+def test_progress_callback_observes_post_pattern_complete_poll_without_changing_search():
+    def evaluate(controls):
+        return SimpleNamespace(feasible=True, lap_time_s=float((controls[0] - 2.0) ** 2))
+
+    initial_controls = np.zeros(1)
+    initial = evaluate(initial_controls)
+    config = PlanarOptimisationConfig(max_sweeps=1, max_evaluations=20)
+    common = (initial_controls, np.array([-3.0]), np.array([3.0]),
+              initial, evaluate, config)
+    without = _best_improvement_pattern_search(*common)
+    snapshots = []
+    with_callback = _best_improvement_pattern_search(
+        *common, progress_callback=snapshots.append)
+
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert np.array_equal(snapshot.best_controls_m, [2.0])
+    assert snapshot.lap_time_s == 0.0
+    assert (snapshot.evaluations, snapshot.sweeps, snapshot.step_m, snapshot.improved) == (
+        8, 1, 1.0, True)
+    with pytest.raises(ValueError):
+        snapshot.best_controls_m[0] = 99.0
+    assert np.array_equal(without[0], with_callback[0])
+    assert without[1].lap_time_s == with_callback[1].lap_time_s
+    assert without[2:] == with_callback[2:]
+
+
+def test_progress_callback_is_not_called_when_complete_poll_is_refused():
+    def evaluate(controls):
+        return SimpleNamespace(feasible=True, lap_time_s=float(np.sum(controls ** 2)))
+
+    snapshots = []
+    controls = np.zeros(1)
+    result = _best_improvement_pattern_search(
+        controls, np.array([-2.0]), np.array([2.0]), evaluate(controls), evaluate,
+        PlanarOptimisationConfig(max_sweeps=2, max_evaluations=6),
+        progress_callback=snapshots.append)
+
+    assert snapshots == []
+    assert result[2] == 1 and result[3] == 0
