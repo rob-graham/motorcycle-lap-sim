@@ -4,15 +4,23 @@
 
 Phase 8 racing-line development is closed for the present development sequence. This document freezes the numerical/software baseline to be preserved while Phase 10 telemetry, validation, and roll-response work is added.
 
-The frozen repository commit is:
+The provenance is intentionally split into distinct references:
 
-`300fd58fff97a46d8152422cb1d19077af091a44`
+- `software_source_commit`: `300fd58fff97a46d8152422cb1d19077af091a44` — the pre-Phase-9 source state associated with the historical Phase 8 work;
+- `artifact_first_committed_in`: `67fc56c1508ef1ad7fd267d4ff3ea23a92923a7b` — the merge that first committed the recovered controls and this freeze documentation;
+- `baseline_package_commit`: `f8917f6be7ac06776ccfeab28a7418636958e2bd` — a source state containing the recovered controls, track/motorcycle inputs and executable fixed-geometry reproduction command; and
+- `historical_execution_commit`: unknown — the final external run log for the recovered 69.354897583 s control artifact was not retained, so no source commit is invented for it.
+
+Machine-readable provenance and SHA-256 identities are retained in:
+
+`cases/mallala_r6/baseline/phase9_baseline_manifest.json`
 
 The freeze uses:
 
 - track: `examples/tracks/mallala_reference.yaml` (Mallala centreline fit v0.3);
 - motorcycle: `examples/motorcycles/r6_2017plus_reference.yaml`;
-- Phase 8 diagnostic: `scripts/r6_phase8_planar_optimisation_check.py`;
+- recovered controls: `cases/mallala_r6/baseline/phase8_reference_controls.csv`;
+- executable fixed-geometry check: `scripts/r6_phase9_baseline_check.py`;
 - ideal handling response, with the provisional curvature-transient proxy disabled unless a comparison explicitly says otherwise; and
 - SI units internally.
 
@@ -26,7 +34,13 @@ The recovered final reference control artifact is retained as:
 
 `cases/mallala_r6/baseline/phase8_reference_controls.csv`
 
-The artifact supplied for the freeze is identified as the **69.354897583 s** reference result and contains 52 controls. The recovered controls include two values exactly at their lower local bounds; that fact is retained rather than hidden and should be considered when interpreting later geometry/physics comparisons.
+Its SHA-256 is:
+
+`2290d07de682fa0ced7701d6cfb6f8459a9e0a96bfd662b0f37c931b8ea5d368`
+
+The artifact supplied for the freeze is identified by the recovered historical run label **69.354897583 s** and contains 52 controls. The CSV body contains stations, controls and bounds; it does not contain the final lap time or the complete final-run convergence/evaluation metadata. Therefore **69.354897583 s remains a recovered historical result label until the fixed-geometry repository check reproduces it**. This qualification is deliberate and must not be replaced by invented provenance.
+
+The recovered controls include two values exactly at their lower local bounds; that fact is retained rather than hidden and should be considered when interpreting later geometry/physics comparisons.
 
 ### Earlier 70.243539391 s restart seed
 
@@ -79,27 +93,44 @@ The extra-fine diagnostic remains useful for comparison against later roll-aware
 
 ## Verification status
 
-On 16 August 2026 the complete repository test suite passed after the telemetry dependency was installed:
+On 16 August 2026 the complete repository test suite passed after the telemetry dependency was installed. Later Phase 10 integration hardening increased the suite further; the current full-suite result must be recorded with the pull request that completes this baseline reproduction work.
 
-`185 passed`
-
-This satisfies the software-test portion of the Phase 9 numerical freeze. The numerical baseline still carries explicit qualifications about local optimisation, finite output resolution, approximate Mallala geometry, provisional R6 parameters, and near-boundary line choices.
+The software-test result alone does not establish the recovered 69.354897583 s label as an executable numerical regression. That status depends on the command below and the values subsequently recorded in the manifest.
 
 ## Reproduction commands
 
 Run the full test suite first:
 
 ```bash
-python -m pytest
+python -m pytest -q
 ```
 
-For numerical regression checks, re-evaluate the saved 52-control geometry rather than re-optimising it. A fresh optimisation is not expected to reproduce the historical local-search path unless all settings and start conditions are duplicated.
+Then evaluate the saved geometry without running optimisation:
 
-The Phase 8 extra-fine diagnostic policy remains available explicitly. It is 50 m maximum station spacing / 20 degree maximum arc-heading change and produces 96 Mallala controls. It is deliberately not a normal optimisation default.
+```bash
+python scripts/r6_phase9_baseline_check.py
+```
+
+The command:
+
+1. verifies the exact five-column CSV schema;
+2. requires exactly 52 controls;
+3. regenerates the reference-policy stations (100 m maximum spacing / 45 degree maximum arc-heading change);
+4. regenerates the 0.25 m-margin control bounds and checks every stored station/bound/control against them;
+5. verifies the recovered controls SHA-256;
+6. prints SHA-256 identities for the track and motorcycle inputs;
+7. evaluates the same saved geometry at 1.00, 0.50 and 0.25 m output spacing; and
+8. prints lap time and geometric metrics without performing a fresh optimisation.
+
+A fresh optimisation is not expected to reproduce the historical local-search path unless all settings and start conditions are duplicated.
+
+Until the first execution of this command is reviewed, `phase9_baseline_manifest.json` intentionally records `status: pending_first_executable_reproduction` and does not populate executable lap-time tolerances. If the 1.0 m result reproduces 69.354897583 s, that value can become the executable regression target with an explicit tolerance. If it does not, the manifest and tests must freeze the actually reproducible current-input result separately while retaining 69.354897583 s only as the recovered historical label.
 
 ## Frozen result package requirements
 
-A retained baseline run should record, without suppressing warnings, repository commit, Python/package environment, track and motorcycle input hashes, selected control policy, cold-start/restart status, speed backend and workers, search settings, control count, initial/final lap time, evaluations/sweeps, termination reason, path length, minimum boundary clearance, minimum forward progress, speed/gear/RPM and acceleration summary, fixed-spline output-resolution checks, exported controls, and plots.
+A retained baseline run should record, without suppressing warnings, repository/source provenance, Python/package environment, track and motorcycle input hashes, selected control policy, cold-start/restart status, speed backend and workers, search settings, control count, initial/final lap time, evaluations/sweeps, termination reason, path length, minimum boundary clearance, minimum forward progress, speed/gear/RPM and acceleration summary, fixed-spline output-resolution checks, exported controls, and plots.
+
+Not all of that metadata is recoverable for the historical 69.354897583 s external run. The freeze therefore distinguishes historical provenance from executable repository regression rather than fabricating missing fields.
 
 ## Optimisation-assurance finding retained from Phase 8
 
@@ -107,14 +138,15 @@ The extra-fine exercise is retained as an optimisation-assurance finding, not as
 
 Therefore:
 
-1. retain the recovered 52-control 69.354897583 s result as the representative Phase 10 ideal-response baseline;
-2. retain the current deterministic pattern search as the reference optimiser for the immediate telemetry/physics work;
-3. preserve the 96-control result and its run settings as optimisation-assurance evidence;
-4. do not make an even denser/exhaustive local search the default next step; and
-5. defer systematic multistart, cross-resolution ranking, measured-line starts, perturbation starts, and any independent benchmark optimiser to the later optimisation-assurance phase.
+1. retain the recovered 52-control artifact as the representative Phase 10 ideal-response geometry;
+2. retain 69.354897583 s as its historical run label unless/until the executable check verifies that exact value;
+3. retain the current deterministic pattern search as the reference optimiser for the immediate telemetry/physics work;
+4. preserve the 96-control result and its run settings as optimisation-assurance evidence;
+5. do not make an even denser/exhaustive local search the default next step; and
+6. defer systematic multistart, cross-resolution ranking, measured-line starts, perturbation starts, and any independent benchmark optimiser to the later optimisation-assurance phase.
 
 This finding does not prove that either Phase 8 line is the global optimum. It records why brute-force densification of the same local method is not the preferred immediate development direction.
 
 ## Change-control rule
 
-Phase 10 changes must be switchable or otherwise traceable so that the frozen ideal-response case can still be reproduced. Compare new physics against the saved 52-control geometry first. If a later result differs with Phase 10 features disabled, treat that as a numerical regression until a documented intentional change explains it.
+Phase 10 changes must be switchable or otherwise traceable so that the frozen ideal-response case can still be evaluated. Compare new physics against the saved 52-control geometry first. Once the executable baseline values and tolerances are recorded in the manifest, any later difference with Phase 10 features disabled is a numerical regression until a documented intentional change explains it.
