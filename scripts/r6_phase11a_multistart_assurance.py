@@ -5,7 +5,7 @@ runs the existing deterministic planar optimiser from a small set of materially
 different starting controls, then re-evaluates every final candidate on one
 common fine grid using the Python speed backend.
 
-The objective is optimisation assurance for track-layout work.  When starts hit
+The objective is optimisation assurance for track-layout work. When starts hit
 the evaluation cap at materially different search-step sizes, their lap-time
 spread is a search-budget/convergence diagnostic, not evidence for a family of
 converged local optima.
@@ -187,6 +187,37 @@ def build_starting_controls(
 def rank_candidates(rows):
     """Return a stable ascending common-grid ranking without hiding ties."""
     return sorted(rows, key=lambda row: (row["common_grid_lap_s"], row["start_name"]))
+
+
+def convergence_spread_interpretation(rows):
+    """Classify spread only when termination metadata is available for every run."""
+    if any(row["run_source"] != "optimised" for row in rows):
+        return None, (
+            "termination metadata unavailable for reused controls; common-grid spread alone "
+            "does not establish local-optimum sensitivity"
+        )
+    unfinished = [
+        row for row in rows
+        if row["termination_reason"] == "maximum evaluations reached"
+        and isinstance(row["final_step_m"], (int, float))
+        and float(row["final_step_m"]) > 0.125
+    ]
+    if unfinished:
+        return len(unfinished), (
+            "search-budget/convergence spread; do not treat as local-optimum uncertainty"
+        )
+    return 0, (
+        "all optimised starts reached comparable fine search steps; spread is more informative "
+        "about local-optimum sensitivity"
+    )
+
+
+def summary_filename(reuse_existing):
+    """Keep reuse-only summaries separate from optimisation-run provenance."""
+    return (
+        "phase11a_multistart_summary_reused.csv"
+        if reuse_existing else "phase11a_multistart_summary.csv"
+    )
 
 
 def _raw_evaluation(track, bike, stations, controls, spacing):
@@ -404,25 +435,19 @@ def main(argv=None):
             f"rms_control_delta_to_best_m={row['rms_control_delta_to_best_m']:.6f}")
 
     spread = float(ranked[-1]["common_grid_lap_s"] - best_lap)
-    unfinished = [
-        row for row in rows
-        if row["run_source"] == "optimised"
-        and row["termination_reason"] == "maximum evaluations reached"
-        and isinstance(row["final_step_m"], (int, float))
-        and float(row["final_step_m"]) > 0.125
-    ]
+    unfinished_count, spread_interpretation = convergence_spread_interpretation(rows)
     print(f"common_grid_best_start={best['start_name']}")
     print(f"common_grid_best_lap_s={best_lap:.9f}")
     print(f"common_grid_search_budget_spread_s={spread:.9f}")
-    print(f"unfinished_coarse_step_runs={len(unfinished)}")
-    if unfinished:
-        print("spread_interpretation=search-budget/convergence spread; do not treat as local-optimum uncertainty")
+    if unfinished_count is None:
+        print("unfinished_coarse_step_runs=not_available")
     else:
-        print("spread_interpretation=all newly optimised starts reached comparable fine search steps; spread is more informative about local-optimum sensitivity")
+        print(f"unfinished_coarse_step_runs={unfinished_count}")
+    print(f"spread_interpretation={spread_interpretation}")
     print("interpretation_note=this is a bounded multistart screening diagnostic, not proof of a global optimum; poor generic-start convergence should first motivate hierarchical coarse-to-fine warm-starting before a new optimiser algorithm")
     print("calibration_note=no motorcycle, rider, track, or roll-rate parameter is fitted by this command")
 
-    summary_csv = args.output_dir / "phase11a_multistart_summary.csv"
+    summary_csv = args.output_dir / summary_filename(args.reuse_existing)
     _write_summary(summary_csv, ranked)
     print(f"summary_csv={summary_csv}")
 
