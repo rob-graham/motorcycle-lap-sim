@@ -137,7 +137,6 @@ def _bin_run_edges(chainage_m, run, total_length_m):
         upper = total_length_m if stop == len(chainage) - 1 else 0.5 * (chainage[stop] + chainage[stop + 1])
         return float(lower), float(upper)
 
-    # Wrapped run: report the interval as high-chainage:start then 0:low-chainage.
     lower = 0.5 * (chainage[start - 1] + chainage[start])
     upper = 0.5 * (chainage[stop] + chainage[stop + 1])
     return float(lower), float(upper)
@@ -147,6 +146,30 @@ def _require_converged_registration(result):
     if not result.converged:
         raise RuntimeError(
             "rigid registration did not converge; refusing downstream map matching and CSV output")
+
+
+def _filter_lap_envelope_samples(match, speed_mps, position_valid, speed_valid):
+    """Return envelope inputs after applying purpose-specific validity masks.
+
+    Lateral offset requires position evidence accepted for registration.  The
+    chainage-binned speed envelope additionally applies speed-quality criteria;
+    rejected position samples are not assigned a chainage even though their raw
+    non-position channels remain available in the TelemetrySession.
+    """
+    position_valid = np.asarray(position_valid, dtype=bool)
+    speed_valid = np.asarray(speed_valid, dtype=bool)
+    speed_mps = np.asarray(speed_mps, dtype=float)
+    expected = np.asarray(match.chainage_m).shape
+    if (position_valid.shape != expected or speed_valid.shape != expected
+            or speed_mps.shape != expected):
+        raise ValueError("lap envelope masks and speed must match map-match samples")
+    speed_chainage_valid = position_valid & speed_valid
+    return (
+        match.chainage_m[position_valid],
+        match.lateral_offset_m[position_valid],
+        match.chainage_m[speed_chainage_valid],
+        speed_mps[speed_chainage_valid],
+    )
 
 
 def _corridor_diagnostics(track, offset_envelope, eligible_mask):
@@ -205,7 +228,7 @@ def _corridor_diagnostics(track, offset_envelope, eligible_mask):
             print(f"{label}={lower:.3f}:{upper:.3f} bins={len(run)} "
                   f"maximum_median_excess_m={median_excess[local_worst]:.6f} "
                   f"at_chainage_m={offset_envelope.chainage_m[local_worst]:.3f}")
-    print("corridor_note=only bins containing every selected lap are eligible; consistent measured offsets beyond nominal model width indicate local reference-geometry mismatch, not automatic rider off-track classification")
+    print("corridor_note=only bins containing every selected lap after position-valid filtering are eligible; consistent measured offsets beyond nominal model width indicate local reference-geometry mismatch, not automatic rider off-track classification")
     return reference, eligible, median_excess, percentile_touches_outside
 
 
@@ -266,18 +289,24 @@ def main(argv=None):
     indices = _pooled_indices(laps)
     peer_valid, peer_threshold = _peer_mask(peer_values, args.peer_retain_fraction)
 
-    quality_full = gps_quality_mask(
+    position_quality_full = gps_quality_mask(
         quality,
         min_satellites=args.min_satellites,
         max_position_accuracy_m=args.max_position_accuracy_m,
+    )
+    speed_quality_full = gps_quality_mask(
+        quality,
+        min_satellites=args.min_satellites,
         max_speed_accuracy_mps=args.max_speed_accuracy_mps,
     )
-    quality_valid = quality_full[indices]
-    registration_valid = peer_valid & quality_valid
+    position_quality_valid = position_quality_full[indices]
+    speed_quality_valid = speed_quality_full[indices]
+    registration_valid = peer_valid & position_quality_valid
     print(f"peer_retain_fraction={args.peer_retain_fraction:.6f}")
     print(f"peer_threshold_m={peer_threshold:.9f}")
     print(f"peer_retained={np.count_nonzero(peer_valid)}/{len(peer_valid)}")
-    print(f"quality_retained={np.count_nonzero(quality_valid)}/{len(quality_valid)}")
+    print(f"position_quality_retained={np.count_nonzero(position_quality_valid)}/{len(position_quality_valid)}")
+    print(f"speed_quality_retained={np.count_nonzero(speed_quality_valid)}/{len(speed_quality_valid)}")
     print(f"registration_valid={np.count_nonzero(registration_valid)}/{len(registration_valid)}")
     if not np.any(registration_valid):
         raise ValueError("registration mask rejected all complete-lap samples")
@@ -308,9 +337,17 @@ def main(argv=None):
 
     lap_chainage = []
     lap_offset = []
+    lap_speed_chainage = []
     lap_speed = []
+    pooled_start = 0
     for lap, peer_lap in zip(laps, peer.median_nearest_distance_m):
         start, stop = lap.start_index, lap.stop_index
+        sample_count = stop - start
+        pooled_stop = pooled_start + sample_count
+        lap_position_valid = registration_valid[pooled_start:pooled_stop]
+        lap_speed_valid = speed_quality_valid[pooled_start:pooled_stop]
+        pooled_start = pooled_stop
+
         x_m, y_m = transform.world_to_local(session.east_m[start:stop], session.north_m[start:stop])
         match = map_match_nearest(x_m, y_m, sampled_track)
         progress = chainage_progress_diagnostics(
@@ -320,7 +357,9 @@ def main(argv=None):
         peer_peak = int(np.argmax(peer_lap))
         source_index = start + peer_peak
         print(
-            f"lap_id={lap.lap_id} samples={stop - start} "
+            f"lap_id={lap.lap_id} samples={sample_count} "
+            f"position_envelope_retained={np.count_nonzero(lap_position_valid)}/{sample_count} "
+            f"speed_envelope_retained={np.count_nonzero(lap_position_valid & lap_speed_valid)}/{sample_count} "
             f"residual_rms_m={np.sqrt(np.mean(residual ** 2)):.9f} "
             f"residual_median_m={np.median(residual):.9f} "
             f"residual_p95_m={np.percentile(residual, 95.0):.9f} "
@@ -333,18 +372,22 @@ def main(argv=None):
             f"peer_peak_nsat={quality.satellites[source_index]:.3f} "
             f"peer_peak_position_accuracy_m={quality.position_accuracy_m[source_index]:.9f} "
             f"peer_peak_speed_accuracy_mps={quality.speed_accuracy_mps[source_index]:.9f}")
-        lap_chainage.append(match.chainage_m)
-        lap_offset.append(match.lateral_offset_m)
-        lap_speed.append(session.speed_mps[start:stop])
+        offset_s, offset_values, speed_s, speed_values = _filter_lap_envelope_samples(
+            match, session.speed_mps[start:stop], lap_position_valid, lap_speed_valid)
+        lap_chainage.append(offset_s)
+        lap_offset.append(offset_values)
+        lap_speed_chainage.append(speed_s)
+        lap_speed.append(speed_values)
 
     _print_heading_summary(session.heading_rad[indices], peer_values, quality, indices,
                            args.heading_bin_deg)
     print("heading_note=heading bins are association diagnostics; track sector and rider line are confounders")
+    print("envelope_mask_note=lateral and chainage-binned speed envelopes exclude peer/position-invalid samples; raw non-position telemetry remains available for separate time-domain analysis")
 
     offset_envelope = cross_lap_envelope(
         lap_chainage, lap_offset, track.total_length_m, bin_width_m=10.0)
     speed_envelope = cross_lap_envelope(
-        lap_chainage, lap_speed, track.total_length_m, bin_width_m=10.0)
+        lap_speed_chainage, lap_speed, track.total_length_m, bin_width_m=10.0)
     complete_offset_bins = offset_envelope.lap_count == len(laps)
     complete_speed_bins = speed_envelope.lap_count == len(laps)
     print(f"envelope_bins={len(offset_envelope.chainage_m)}")

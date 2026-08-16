@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from motorcycle_lap_sim.telemetry import cross_lap_envelope
 from motorcycle_lap_sim.telemetry.repeatability import CrossLapEnvelope
 from motorcycle_lap_sim.track import Straight, Track
 
@@ -110,3 +111,28 @@ def test_envelope_csv_preserves_missing_corridor_evidence(tmp_path):
     assert rows[1]["corridor_evidence_complete"] == "0"
     assert rows[1]["median_model_corridor_excess_m"] == ""
     assert rows[1]["p10_p90_touches_outside_model_corridor"] == ""
+
+
+def test_rejected_position_sample_cannot_enter_lateral_or_chainage_speed_envelope():
+    match = SimpleNamespace(
+        chainage_m=np.array([5.0, 15.0, 25.0]),
+        lateral_offset_m=np.array([0.5, 50.0, 1.0]),
+    )
+    speed = np.array([20.0, 99.0, 22.0])
+    # Middle point represents a GPS-position excursion rejected by the
+    # peer/position mask. Its raw speed remains available elsewhere, but cannot
+    # be assigned to a chainage bin by this position-derived map match.
+    position_valid = np.array([True, False, True])
+    speed_valid = np.array([True, True, True])
+
+    offset_s, offset_values, speed_s, speed_values = MODULE._filter_lap_envelope_samples(
+        match, speed, position_valid, speed_valid)
+
+    assert np.array_equal(offset_s, [5.0, 25.0])
+    assert np.array_equal(offset_values, [0.5, 1.0])
+    assert np.array_equal(speed_s, [5.0, 25.0])
+    assert np.array_equal(speed_values, [20.0, 22.0])
+
+    envelope = cross_lap_envelope([offset_s], [offset_values], 30.0, bin_width_m=10.0)
+    assert np.isnan(envelope.median[1])
+    assert envelope.lap_count[1] == 0

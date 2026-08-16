@@ -14,11 +14,22 @@ HEADERS = [
     "GPS LatAcc", "GPS LonAcc", "GPS Slope", "GPS Heading", "GPS Gyro",
     "GPS Latitude", "GPS Longitude", "RollRate", "PitchRate", "YawRate",
     "ECU RPM", "ECU GEAR", "ECU THROTTLE", "ECU TPS HAND", "Dist from Start",
-    None, None,
+    "Startline", "Lap",
 ]
 UNITS = ["s", "m", "m", "m", "km/h", "g", "g", "deg", "deg", "deg/s",
          "deg", "deg", "deg/s", "deg/s", "deg/s", "rpm", "gear", "deg", "%", "m",
          None, None]
+
+
+def _telemetry_rows():
+    return [
+        [10.0, 100.0, 1.0, 2.0, 72.0, 1.0, -0.5, 10.0, 90.0, 180.0,
+         -34.4, 138.5, 90.0, 0.0, -45.0, 12000.0, 3, 30.0, 50.0, 2.2,
+         "start", 5],
+        [10.05, 101.0, 1.5, 2.0, 36.0, 0.0, 0.0, 0.0, 91.0, 0.0,
+         -34.4, 138.5, 0.0, 0.0, 0.0, 11000.0, 3.42, 20.0, 25.0, 2.5,
+         None, 5],
+    ]
 
 
 def test_aim_workbook_import_converts_units_and_lap_ids(tmp_path):
@@ -28,14 +39,8 @@ def test_aim_workbook_import_converts_units_and_lap_ids(tmp_path):
     sheet.title = "Updated"
     sheet.append(HEADERS)
     sheet.append(UNITS)
-    sheet.append([10.0, 100.0, 1.0, 2.0, 72.0, 1.0, -0.5, 10.0, 90.0, 180.0,
-                  -34.4, 138.5, 90.0, 0.0, -45.0, 12000.0, 3, 30.0, 50.0, 2.2,
-                  "start", 5])
-    # AiM can interpolate the gear channel across a shift. Preserve that raw
-    # numeric value at import; integer classification is a later cleaning step.
-    sheet.append([10.05, 101.0, 1.5, 2.0, 36.0, 0.0, 0.0, 0.0, 91.0, 0.0,
-                  -34.4, 138.5, 0.0, 0.0, 0.0, 11000.0, 3.42, 20.0, 25.0, 2.5,
-                  None, 5])
+    for row in _telemetry_rows():
+        sheet.append(row)
     path = tmp_path / "telemetry.xlsx"
     workbook.save(path)
 
@@ -53,6 +58,44 @@ def test_aim_workbook_import_converts_units_and_lap_ids(tmp_path):
     assert len(laps) == 1 and laps[0].lap_id == 5
     assert laps[0].start_index == 0 and laps[0].stop_index == 2
     assert laps[0].duration_s == pytest.approx(0.05)
+
+
+def test_aim_workbook_resolves_marker_and_lap_after_column_reordering(tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Updated"
+    reordered_headers = ["Lap", "unrelated", *HEADERS[:-2], "Startline"]
+    reordered_units = [None, None, *UNITS[:-2], None]
+    sheet.append(reordered_headers)
+    sheet.append(reordered_units)
+    for source in _telemetry_rows():
+        values = dict(zip(HEADERS, source))
+        sheet.append([values["Lap"], 12345, *[values[name] for name in HEADERS[:-2]],
+                      values["Startline"]])
+    path = tmp_path / "telemetry_reordered.xlsx"
+    workbook.save(path)
+
+    session = load_aim_workbook(path)
+
+    assert session.marker == ("start", None)
+    assert np.array_equal(session.lap_id, [5, 5])
+    assert np.array_equal(session.speed_mps, [20.0, 10.0])
+
+
+def test_aim_workbook_requires_lap_and_startline_headers(tmp_path):
+    openpyxl = pytest.importorskip("openpyxl")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Updated"
+    sheet.append(HEADERS[:-2])
+    sheet.append(UNITS[:-2])
+    sheet.append(_telemetry_rows()[0][:-2])
+    path = tmp_path / "telemetry_missing_lap.xlsx"
+    workbook.save(path)
+
+    with pytest.raises(ValueError, match="Startline, Lap"):
+        load_aim_workbook(path)
 
 
 def test_world_to_local_uses_explicit_bearing():
@@ -114,8 +157,6 @@ def _registration_fixture():
 def test_rigid_registration_recovers_transform_and_trims_position_outlier():
     sampled, true_transform, east, north = _registration_fixture()
 
-    # Simulate a transient GPS position error at one sample.  The registration
-    # should not move the track transform to explain it.
     east[-1] += 40.0
     north[-1] -= 25.0
 

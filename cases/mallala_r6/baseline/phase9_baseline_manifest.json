@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "status": "executable_regression_verified",
+  "verification_date": "2026-08-16",
+  "historical_reference": {
+    "lap_time_label_s": 69.354897583,
+    "execution_commit": null,
+    "provenance_note": "Recovered external control artifact; the precise historical value was carried by the supplied run label/filename rather than a retained final-run log. The canonical repository fixed-geometry check independently reproduced the same 1.0 m lap time on 2026-08-16, so it is now also the executable regression value."
+  },
+  "software_source_commit": "300fd58fff97a46d8152422cb1d19077af091a44",
+  "artifact_first_committed_in": "67fc56c1508ef1ad7fd267d4ff3ea23a92923a7b",
+  "baseline_package_commit": "04bcf77829704b2de11a1b0a7f3dea45e3c9a08f",
+  "historical_execution_commit": null,
+  "inputs": {
+    "controls": {
+      "path": "cases/mallala_r6/baseline/phase8_reference_controls.csv",
+      "sha256": "2290d07de682fa0ced7701d6cfb6f8459a9e0a96bfd662b0f37c931b8ea5d368",
+      "control_count": 52
+    },
+    "track": {
+      "path": "examples/tracks/mallala_reference.yaml",
+      "sha256": "f419ee6e6e48f92b1d884223052f2db4411e6ea2a75c7e9a1e9e1c10f04cb787"
+    },
+    "motorcycle": {
+      "path": "examples/motorcycles/r6_2017plus_reference.yaml",
+      "sha256": "1cd7d74a272b2dd8b42339fd0e85e46f3dc67485696aba772e901bdc27922832"
+    }
+  },
+  "evaluation": {
+    "control_policy": "reference",
+    "control_policy_max_spacing_m": 100.0,
+    "control_policy_max_arc_heading_change_deg": 45.0,
+    "boundary_margin_m": 0.25,
+    "boundary_check_spacing_m": 0.25,
+    "speed_backend": "python",
+    "output_spacings_m": [1.0, 0.5, 0.25],
+    "executable_lap_times_s": [69.354897583, 69.321493766, 69.305349182],
+    "path_length_m": 2510.660863823,
+    "minimum_boundary_clearance_m": 0.000014708,
+    "projected_offset_min_m": -3.749985292,
+    "projected_offset_max_m": 4.749689886,
+    "curvature_min_1pm": [-0.101362936, -0.101793650, -0.101472758],
+    "curvature_max_1pm": [0.027468564, 0.027609254, 0.027597204],
+    "accepted_tolerances": {
+      "lap_time_abs_s": 0.000001,
+      "path_length_abs_m": 0.000001,
+      "minimum_boundary_clearance_abs_m": 0.0000001,
+      "projected_offset_abs_m": 0.000001,
+      "curvature_abs_1pm": 0.000001
+    }
+  },
+  "verification": {
+    "full_test_suite": "207 passed in 55.13 s",
+    "historical_reference_label_status": "reproduced",
+    "one_metre_minus_historical_label_s": 0.0
+  }
+}
