@@ -29,7 +29,10 @@ class TelemetrySession:
     pitch_rate_radps: FloatArray
     yaw_rate_radps: FloatArray
     engine_rpm: FloatArray
-    gear_number: IntArray
+    # Preserve the raw numeric AiM gear signal. The supplied workbook contains
+    # interpolated fractional values during shifts, so integer classification is
+    # a later validation/cleaning operation rather than an import assumption.
+    gear_number: FloatArray
     ecu_throttle_rad: FloatArray
     hand_throttle_fraction: FloatArray
     distance_from_start_m: FloatArray
