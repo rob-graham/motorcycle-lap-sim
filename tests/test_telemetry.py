@@ -30,8 +30,10 @@ def test_aim_workbook_import_converts_units_and_lap_ids(tmp_path):
     sheet.append([10.0, 100.0, 1.0, 2.0, 72.0, 1.0, -0.5, 10.0, 90.0, 180.0,
                   -34.4, 138.5, 90.0, 0.0, -45.0, 12000.0, 3, 30.0, 50.0, 2.2,
                   "start", 5])
+    # AiM can interpolate the gear channel across a shift. Preserve that raw
+    # numeric value at import; integer classification is a later cleaning step.
     sheet.append([10.05, 101.0, 1.5, 2.0, 36.0, 0.0, 0.0, 0.0, 91.0, 0.0,
-                  -34.4, 138.5, 0.0, 0.0, 0.0, 11000.0, 3, 20.0, 25.0, 2.5,
+                  -34.4, 138.5, 0.0, 0.0, 0.0, 11000.0, 3.42, 20.0, 25.0, 2.5,
                   None, 5])
     path = tmp_path / "telemetry.xlsx"
     workbook.save(path)
@@ -44,6 +46,7 @@ def test_aim_workbook_import_converts_units_and_lap_ids(tmp_path):
     assert session.heading_rad[0] == pytest.approx(math.pi / 2)
     assert session.roll_rate_radps[0] == pytest.approx(math.pi / 2)
     assert session.hand_throttle_fraction[0] == pytest.approx(0.5)
+    assert np.array_equal(session.gear_number, [3.0, 3.42])
     assert session.marker == ("start", None)
     laps = lap_slices(session)
     assert len(laps) == 1 and laps[0].lap_id == 5
