@@ -5,9 +5,10 @@ runs the existing deterministic planar optimiser from a small set of materially
 different starting controls, then re-evaluates every final candidate on one
 common fine grid using the Python speed backend.
 
-The objective is optimisation assurance for track-layout work: determine whether
-credible starts collapse toward essentially the same solution, or whether local
-optima remain important enough to justify improving the optimiser.
+The objective is optimisation assurance for track-layout work.  When starts hit
+the evaluation cap at materially different search-step sizes, their lap-time
+spread is a search-budget/convergence diagnostic, not evidence for a family of
+converged local optima.
 """
 
 import argparse
@@ -403,10 +404,22 @@ def main(argv=None):
             f"rms_control_delta_to_best_m={row['rms_control_delta_to_best_m']:.6f}")
 
     spread = float(ranked[-1]["common_grid_lap_s"] - best_lap)
+    unfinished = [
+        row for row in rows
+        if row["run_source"] == "optimised"
+        and row["termination_reason"] == "maximum evaluations reached"
+        and isinstance(row["final_step_m"], (int, float))
+        and float(row["final_step_m"]) > 0.125
+    ]
     print(f"common_grid_best_start={best['start_name']}")
     print(f"common_grid_best_lap_s={best_lap:.9f}")
-    print(f"common_grid_full_spread_s={spread:.9f}")
-    print("interpretation_note=this is a bounded multistart screening diagnostic, not proof of a global optimum; materially different final solutions justify further optimiser work, while close convergence supports retaining the simple deterministic search")
+    print(f"common_grid_search_budget_spread_s={spread:.9f}")
+    print(f"unfinished_coarse_step_runs={len(unfinished)}")
+    if unfinished:
+        print("spread_interpretation=search-budget/convergence spread; do not treat as local-optimum uncertainty")
+    else:
+        print("spread_interpretation=all newly optimised starts reached comparable fine search steps; spread is more informative about local-optimum sensitivity")
+    print("interpretation_note=this is a bounded multistart screening diagnostic, not proof of a global optimum; poor generic-start convergence should first motivate hierarchical coarse-to-fine warm-starting before a new optimiser algorithm")
     print("calibration_note=no motorcycle, rider, track, or roll-rate parameter is fitted by this command")
 
     summary_csv = args.output_dir / "phase11a_multistart_summary.csv"
