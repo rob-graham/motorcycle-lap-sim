@@ -27,7 +27,8 @@ from motorcycle_lap_sim.optimisation import (
     optimise_planar_racing_line,
     planar_control_bounds,
 )
-from motorcycle_lap_sim.track import Track
+from motorcycle_lap_sim.racing_line.planar_spline import PeriodicPlanarSpline
+from motorcycle_lap_sim.track import Track, sample_track_stations
 
 
 DEFAULT_RANKING_SPACING_M = 0.25
@@ -109,6 +110,55 @@ def periodic_linear_transfer(source_s_m, source_controls_m, target_s_m, lap_leng
     return np.interp(wrapped_target, extended_s, extended_controls)
 
 
+def least_squares_centreline_controls(
+        track, control_s_m, lower_bounds_m, upper_bounds_m, fit_spacing_m):
+    """Fit the sparse Cartesian spline to the geometric track centreline.
+
+    Zero lateral offsets do not in general produce a centreline-following
+    *spline*: a sparse Cartesian cubic can overshoot between its guides.  This
+    deterministic linear least-squares fit uses no reviewed racing-line data;
+    it only chooses guide offsets whose spline best approximates densely
+    sampled centreline coordinates, then applies the ordinary local bounds.
+    """
+    stations = np.asarray(control_s_m, dtype=float)
+    lower = np.asarray(lower_bounds_m, dtype=float)
+    upper = np.asarray(upper_bounds_m, dtype=float)
+    if (stations.ndim != 1 or len(stations) < 4
+            or lower.shape != stations.shape or upper.shape != stations.shape):
+        raise ValueError("stations and bounds must be matching 1D arrays with at least four controls")
+    if (not np.all(np.isfinite(stations)) or not np.all(np.isfinite(lower))
+            or not np.all(np.isfinite(upper)) or np.any(lower > upper)):
+        raise ValueError("stations and bounds must be finite and ordered")
+    if not math.isfinite(fit_spacing_m) or fit_spacing_m <= 0.0:
+        raise ValueError("fit spacing must be finite and positive")
+
+    guide_track = sample_track_stations(track, stations)
+    fit_count = max(4, math.ceil(track.total_length_m / fit_spacing_m))
+    fit_s = np.arange(fit_count, dtype=float) * track.total_length_m / fit_count
+    target = sample_track_stations(track, fit_s)
+
+    def spline_points(controls):
+        spline = PeriodicPlanarSpline(
+            stations,
+            guide_track.x_m + controls * guide_track.normal_x,
+            guide_track.y_m + controls * guide_track.normal_y,
+            track.total_length_m,
+        )
+        x_m, y_m, *_ = spline.evaluate(fit_s)
+        return np.column_stack((x_m, y_m)).ravel()
+
+    zero = np.zeros(len(stations))
+    base = spline_points(zero)
+    design = np.empty((len(base), len(stations)))
+    for index in range(len(stations)):
+        unit = zero.copy()
+        unit[index] = 1.0
+        design[:, index] = spline_points(unit) - base
+    target_xy = np.column_stack((target.x_m, target.y_m)).ravel()
+    controls, *_ = np.linalg.lstsq(design, target_xy - base, rcond=None)
+    return np.clip(controls, lower, upper)
+
+
 def _evaluate(track, bike, stations, controls, spacing):
     evaluation = evaluate_planar_racing_line(
         controls, track, bike, stations,
@@ -166,7 +216,9 @@ def main(argv=None):
     coarse_s = generate_planar_control_stations(track, COARSE_PLANAR_CONTROL_POLICY)
     coarse_lower, coarse_upper = planar_control_bounds(
         track, coarse_s, phase9.BOUNDARY_MARGIN_M)
-    coarse_centreline = np.clip(np.zeros_like(coarse_s), coarse_lower, coarse_upper)
+    coarse_centreline = least_squares_centreline_controls(
+        track, coarse_s, coarse_lower, coarse_upper,
+        phase9.BOUNDARY_CHECK_SPACING_M)
 
     reference_s = generate_planar_control_stations(track, REFERENCE_PLANAR_CONTROL_POLICY)
     reference_lower, reference_upper = planar_control_bounds(

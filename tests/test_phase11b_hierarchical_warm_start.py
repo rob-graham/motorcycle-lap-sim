@@ -47,3 +47,40 @@ def test_periodic_linear_transfer_rejects_unsorted_sources():
             np.array([10.0]),
             100.0,
         )
+
+
+def test_sparse_centreline_fit_is_feasible_on_mallala():
+    diagnostic = _load_script()
+    from motorcycle_lap_sim.optimisation import (
+        COARSE_PLANAR_CONTROL_POLICY,
+        evaluate_planar_racing_line,
+        generate_planar_control_stations,
+        planar_control_bounds,
+    )
+    from motorcycle_lap_sim.track import Track
+
+    track = Track.from_yaml("examples/tracks/mallala_reference.yaml")
+    stations = generate_planar_control_stations(track, COARSE_PLANAR_CONTROL_POLICY)
+    lower, upper = planar_control_bounds(track, stations, 0.25)
+
+    zero_evaluation = evaluate_planar_racing_line(
+        np.zeros_like(stations), track, object(), stations,
+        sample_spacing_m=1.0, boundary_margin_m=0.25,
+        boundary_check_spacing_m=0.25,
+    )
+    assert not zero_evaluation.feasible
+    assert "overshoots track boundary" in zero_evaluation.failure_reason
+
+    fitted = diagnostic.least_squares_centreline_controls(
+        track, stations, lower, upper, 0.25)
+    # Geometry is checked directly because this regression concerns spline
+    # feasibility, not motorcycle physics or the speed solver.
+    from motorcycle_lap_sim.racing_line import build_smooth_racing_line_path
+    result = build_smooth_racing_line_path(
+        track, fitted, guide_s_m=stations, sample_spacing_m=1.0,
+        boundary_margin_m=0.25, boundary_check_spacing_m=0.25,
+    )
+
+    assert np.all(fitted >= lower)
+    assert np.all(fitted <= upper)
+    assert result.minimum_boundary_clearance_m >= 0.0
