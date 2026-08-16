@@ -82,11 +82,20 @@ def _comparison(track, speed_mps, measured, required_lap_count):
 
 
 def _print_case(label, result, summary):
-    finite_roll = np.isfinite(result.speed_limit_roll_rate_mps)
+    finite_roll_ceiling = np.isfinite(result.speed_limit_roll_rate_mps)
+    binding_roll_ceiling = finite_roll_ceiling & np.isclose(
+        result.speed_mps, result.speed_limit_roll_rate_mps,
+        rtol=1e-8, atol=1e-6,
+    )
     maximum_rate = float(np.max(np.abs(result.demanded_roll_rate_radps)))
     print(f"case={label}")
     print(f"lap_s={result.lap_time_s:.9f}")
-    print(f"roll_limited_samples={np.count_nonzero(finite_roll)}/{len(finite_roll)}")
+    print(
+        "finite_roll_ceiling_samples="
+        f"{np.count_nonzero(finite_roll_ceiling)}/{len(finite_roll_ceiling)}")
+    print(
+        "binding_roll_ceiling_samples="
+        f"{np.count_nonzero(binding_roll_ceiling)}/{len(binding_roll_ceiling)}")
     print(f"maximum_level1_demanded_roll_rate_radps={maximum_rate:.9f}")
     print(f"eligible_complete_lap_bins={summary.eligible_bins}")
     print(f"mean_sim_minus_measured_median_mps={summary.mean_bias_mps:.9f}")
