@@ -1,9 +1,9 @@
-"""Evaluate the recovered Phase 9 Mallala R6 reference controls without optimisation.
+"""Evaluate and verify the frozen Phase 9 Mallala R6 reference geometry.
 
-This command is deliberately a fixed-geometry reproduction check.  It validates
-artifact identity, control-station policy and stored bounds before evaluating the
-saved controls at fixed output spacings.  It does not claim that the recovered
-historical 69.354897583 s run label is reproduced until the calculation says so.
+The command loads the recovered 52-control artifact without optimisation,
+validates its identity/stations/bounds, evaluates the fixed geometry at the
+frozen output spacings, and fails closed if the canonical baseline no longer
+matches the executable regression values established on 16 August 2026.
 """
 
 import argparse
@@ -11,6 +11,7 @@ import csv
 import hashlib
 import math
 from pathlib import Path
+import platform
 
 import numpy as np
 
@@ -29,10 +30,27 @@ DEFAULT_TRACK = Path("examples/tracks/mallala_reference.yaml")
 DEFAULT_MOTORCYCLE = Path("examples/motorcycles/r6_2017plus_reference.yaml")
 EXPECTED_CONTROL_COUNT = 52
 EXPECTED_CONTROLS_SHA256 = "2290d07de682fa0ced7701d6cfb6f8459a9e0a96bfd662b0f37c931b8ea5d368"
+EXPECTED_TRACK_SHA256 = "f419ee6e6e48f92b1d884223052f2db4411e6ea2a75c7e9a1e9e1c10f04cb787"
+EXPECTED_MOTORCYCLE_SHA256 = "1cd7d74a272b2dd8b42339fd0e85e46f3dc67485696aba772e901bdc27922832"
 HISTORICAL_REFERENCE_LABEL_LAP_S = 69.354897583
 BOUNDARY_MARGIN_M = 0.25
 BOUNDARY_CHECK_SPACING_M = 0.25
 OUTPUT_SPACINGS_M = (1.0, 0.5, 0.25)
+EXPECTED_LAP_TIMES_S = (69.354897583, 69.321493766, 69.305349182)
+EXPECTED_PATH_LENGTH_M = 2510.660863823
+EXPECTED_MINIMUM_BOUNDARY_CLEARANCE_M = 0.000014708
+EXPECTED_PROJECTED_OFFSET_MIN_M = -3.749985292
+EXPECTED_PROJECTED_OFFSET_MAX_M = 4.749689886
+EXPECTED_CURVATURE_MIN_1PM = (-0.101362936, -0.101793650, -0.101472758)
+EXPECTED_CURVATURE_MAX_1PM = (0.027468564, 0.027609254, 0.027597204)
+
+# Tight numerical-regression tolerances. Hash checks separately require exact
+# identity of the controls, track and motorcycle inputs.
+LAP_TIME_ATOL_S = 1e-6
+PATH_LENGTH_ATOL_M = 1e-6
+CLEARANCE_ATOL_M = 1e-7
+OFFSET_ATOL_M = 1e-6
+CURVATURE_ATOL_1PM = 1e-6
 
 
 def build_parser():
@@ -89,8 +107,9 @@ def load_frozen_controls(path, stations, lower_bounds, upper_bounds):
         raise ValueError("frozen lower bounds do not match the current track/margin inputs")
     if not np.allclose(saved_upper, upper, **tolerance):
         raise ValueError("frozen upper bounds do not match the current track/margin inputs")
-    if np.any((controls < lower) | (controls > upper)):
-        index = int(np.flatnonzero((controls < lower) | (controls > upper))[0])
+    outside = (controls < lower) | (controls > upper)
+    if np.any(outside):
+        index = int(np.flatnonzero(outside)[0])
         raise ValueError(f"frozen control {index} is outside its current stored bounds")
     return controls
 
@@ -119,18 +138,63 @@ def evaluate_baseline(controls_path=DEFAULT_CONTROLS, track_path=DEFAULT_TRACK,
     return track, stations, controls, tuple(evaluations)
 
 
+def _require_close(label, actual, expected, atol):
+    if not math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=atol):
+        raise RuntimeError(
+            f"Phase 9 baseline regression: {label}={actual:.12g} differs from "
+            f"expected {expected:.12g} by more than {atol:.12g}")
+
+
+def verify_default_regression(controls_hash, track_hash, motorcycle_hash, evaluations):
+    """Fail closed if the canonical Python baseline differs from the frozen package."""
+    identities = (
+        ("controls", controls_hash, EXPECTED_CONTROLS_SHA256),
+        ("track", track_hash, EXPECTED_TRACK_SHA256),
+        ("motorcycle", motorcycle_hash, EXPECTED_MOTORCYCLE_SHA256),
+    )
+    for label, actual, expected in identities:
+        if actual != expected:
+            raise RuntimeError(
+                f"Phase 9 baseline regression: {label} SHA-256 {actual} does not match {expected}")
+
+    if len(evaluations) != len(OUTPUT_SPACINGS_M):
+        raise RuntimeError("Phase 9 baseline regression: output-spacing evaluation count changed")
+
+    for spacing, evaluation, expected_lap, expected_kmin, expected_kmax in zip(
+            OUTPUT_SPACINGS_M, evaluations, EXPECTED_LAP_TIMES_S,
+            EXPECTED_CURVATURE_MIN_1PM, EXPECTED_CURVATURE_MAX_1PM):
+        smooth = evaluation.smooth_line
+        path = smooth.sampled_path
+        _require_close(f"lap time at {spacing:.2f} m [s]", evaluation.lap_time_s,
+                       expected_lap, LAP_TIME_ATOL_S)
+        _require_close(f"path length at {spacing:.2f} m [m]", path.total_length_m,
+                       EXPECTED_PATH_LENGTH_M, PATH_LENGTH_ATOL_M)
+        _require_close(f"minimum clearance at {spacing:.2f} m [m]",
+                       smooth.minimum_boundary_clearance_m,
+                       EXPECTED_MINIMUM_BOUNDARY_CLEARANCE_M, CLEARANCE_ATOL_M)
+        _require_close(f"projected offset minimum at {spacing:.2f} m [m]",
+                       np.min(smooth.projected_offset_m), EXPECTED_PROJECTED_OFFSET_MIN_M,
+                       OFFSET_ATOL_M)
+        _require_close(f"projected offset maximum at {spacing:.2f} m [m]",
+                       np.max(smooth.projected_offset_m), EXPECTED_PROJECTED_OFFSET_MAX_M,
+                       OFFSET_ATOL_M)
+        _require_close(f"curvature minimum at {spacing:.2f} m [1/m]",
+                       np.min(path.curvature_1pm), expected_kmin, CURVATURE_ATOL_1PM)
+        _require_close(f"curvature maximum at {spacing:.2f} m [1/m]",
+                       np.max(path.curvature_1pm), expected_kmax, CURVATURE_ATOL_1PM)
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     controls_hash = sha256_file(args.controls)
     track_hash = sha256_file(args.track)
     motorcycle_hash = sha256_file(args.motorcycle)
-    if args.controls == DEFAULT_CONTROLS and controls_hash != EXPECTED_CONTROLS_SHA256:
-        raise RuntimeError(
-            "frozen controls SHA-256 does not match the recovered Phase 9 artifact")
 
     track, stations, controls, evaluations = evaluate_baseline(
         args.controls, args.track, args.motorcycle, speed_backend=args.speed_backend)
 
+    print(f"python_version={platform.python_version()}")
+    print(f"numpy_version={np.__version__}")
     print(f"controls_path={args.controls}")
     print(f"controls_sha256={controls_hash}")
     print(f"track_path={args.track}")
@@ -163,9 +227,18 @@ def main(argv=None):
     print(f"one_metre_minus_historical_label_s={delta:.9f}")
     print("historical_reference_label_status="
           + ("reproduced" if math.isclose(one_metre_lap, HISTORICAL_REFERENCE_LABEL_LAP_S,
-                                          rel_tol=0.0, abs_tol=1e-9)
+                                          rel_tol=0.0, abs_tol=LAP_TIME_ATOL_S)
              else "not_reproduced"))
-    print("baseline_note=the historical 69.354897583 s value is a recovered run label; only a matching fixed-geometry evaluation establishes it as the executable repository regression value")
+
+    canonical = (args.controls == DEFAULT_CONTROLS and args.track == DEFAULT_TRACK
+                 and args.motorcycle == DEFAULT_MOTORCYCLE and args.speed_backend == "python")
+    if canonical:
+        verify_default_regression(controls_hash, track_hash, motorcycle_hash, evaluations)
+        print("executable_baseline_regression_status=passed")
+    else:
+        print("executable_baseline_regression_status=not_checked_noncanonical_inputs")
+
+    print("baseline_note=the recovered historical run label is independently reproduced by the canonical fixed-geometry repository evaluation and is frozen as an executable regression value")
 
 
 if __name__ == "__main__":
