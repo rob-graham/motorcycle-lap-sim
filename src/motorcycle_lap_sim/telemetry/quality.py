@@ -27,11 +27,21 @@ class GPSQualitySeries:
     source_sheet: str
 
     def __post_init__(self):
-        count = len(self.time_s)
-        channels = (self.satellites, self.position_accuracy_m, self.speed_accuracy_mps)
-        if count == 0 or any(len(values) != count for values in channels):
-            raise ValueError("GPS quality channels must be non-empty and have identical lengths")
-        if not np.all(np.isfinite(self.time_s)) or np.any(np.diff(self.time_s) <= 0):
+        names = ("time_s", "satellites", "position_accuracy_m", "speed_accuracy_mps")
+        arrays = []
+        for name in names:
+            values = np.asarray(getattr(self, name), dtype=float)
+            if values.ndim != 1:
+                raise ValueError("GPS quality channels must be one-dimensional")
+            object.__setattr__(self, name, values)
+            arrays.append(values)
+
+        time_s, satellites, position_accuracy_m, speed_accuracy_mps = arrays
+        count = len(time_s)
+        channels = (satellites, position_accuracy_m, speed_accuracy_mps)
+        if count == 0 or any(values.shape != time_s.shape for values in channels):
+            raise ValueError("GPS quality channels must be non-empty and have identical shapes")
+        if not np.all(np.isfinite(time_s)) or np.any(np.diff(time_s) <= 0):
             raise ValueError("GPS quality time must be finite and strictly increasing")
 
 
