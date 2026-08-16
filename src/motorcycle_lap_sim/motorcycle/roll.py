@@ -1,9 +1,9 @@
 """Level-1 demanded-lean and roll-rate calculations for planar validation.
 
-This module begins the Phase 10 roll-response work without replacing the
-existing fixed-path solver or optimiser.  It provides physically interpretable
-quantities that can first be compared with Mallala telemetry and then used by a
-switchable solver constraint in a later Phase 10 change.
+The finite-roll model deliberately remains simple and trajectory-driven.  It
+uses steady planar lean demand and one constant maximum roll-rate parameter; it
+does not infer rider intent or make the limit depend on throttle, braking,
+rider strength, or measured telemetry.
 """
 
 import math
@@ -34,7 +34,8 @@ def demanded_roll_rate_radps(distance_m: ArrayLike, speed_mps: ArrayLike,
 
     Closed paths use a periodic centred difference with the end-to-start spacing
     inferred from the median sample spacing. Open paths use NumPy's second-order
-    gradient. This is a diagnostic/model quantity, not a filtered IMU channel.
+    gradient. This diagnostic includes whatever speed variation is present in
+    the supplied lean array; it is not a filtered IMU channel.
     """
     distance = np.asarray(distance_m, dtype=float)
     speed = np.asarray(speed_mps, dtype=float)
@@ -60,6 +61,109 @@ def demanded_roll_rate_radps(distance_m: ArrayLike, speed_mps: ArrayLike,
     next_s[-1] += lap_length
     derivative = (np.roll(lean, -1) - np.roll(lean, 1)) / (next_s - previous_s)
     return speed * derivative
+
+
+def curvature_transition_roll_rate_radps(
+        speed_mps: ArrayLike, curvature_1pm: ArrayLike,
+        curvature_gradient_1pm2: ArrayLike, *, gravity_mps2: float = 9.80665
+        ) -> FloatArray:
+    """Return the Level-1 roll demand caused by changing path curvature.
+
+    The local speed is held constant while differentiating the steady lean
+    relation.  Therefore this intentionally omits the additional lean-rate term
+    caused by longitudinal acceleration or braking.  That keeps the first
+    finite-roll constraint independent of a rider/braking model while retaining
+    direct dependence on the chosen trajectory.
+    """
+    speed = np.asarray(speed_mps, dtype=float)
+    curvature = np.asarray(curvature_1pm, dtype=float)
+    gradient = np.asarray(curvature_gradient_1pm2, dtype=float)
+    if speed.shape != curvature.shape or speed.shape != gradient.shape:
+        raise ValueError("speed, curvature and curvature gradient must have identical shapes")
+    if not math.isfinite(gravity_mps2) or gravity_mps2 <= 0:
+        raise ValueError("gravity must be finite and positive")
+    if (np.any(speed < 0) or not np.all(np.isfinite(speed))
+            or not np.all(np.isfinite(curvature)) or not np.all(np.isfinite(gradient))):
+        raise ValueError("finite roll inputs require finite curvature/gradient and non-negative speed")
+    lean_ratio = speed * speed * curvature / gravity_mps2
+    return (speed ** 3 * gradient / gravity_mps2) / (1.0 + lean_ratio * lean_ratio)
+
+
+def roll_rate_speed_limit_mps(
+        curvature_1pm: ArrayLike, curvature_gradient_1pm2: ArrayLike,
+        speed_cap_mps: ArrayLike, max_roll_rate_radps: float,
+        *, gravity_mps2: float = 9.80665, bisection_iterations: int = 64
+        ) -> FloatArray:
+    """Return a local speed ceiling for a constant maximum Level-1 roll rate.
+
+    ``speed_cap_mps`` is the already-established lateral/power/other-handling
+    ceiling.  It is used only to decide whether the roll constraint can bind.
+    Non-binding samples return infinity so applying this result cannot alter an
+    otherwise-unconstrained solution.
+
+    For nonzero curvature, the constant-speed roll-demand expression reaches
+    its first maximum at 60 degrees of steady lean.  If a roll limit is crossed,
+    the first crossing is found by deterministic bisection below that maximum.
+    This avoids selecting a spurious high-speed branch of the local formula.
+    """
+    curvature = np.asarray(curvature_1pm, dtype=float)
+    gradient = np.asarray(curvature_gradient_1pm2, dtype=float)
+    cap = np.asarray(speed_cap_mps, dtype=float)
+    if curvature.shape != gradient.shape or curvature.shape != cap.shape:
+        raise ValueError("curvature, curvature gradient and speed cap must have identical shapes")
+    if (not math.isfinite(max_roll_rate_radps) or max_roll_rate_radps <= 0
+            or isinstance(max_roll_rate_radps, bool)):
+        raise ValueError("maximum roll rate must be finite and positive")
+    if not math.isfinite(gravity_mps2) or gravity_mps2 <= 0:
+        raise ValueError("gravity must be finite and positive")
+    if isinstance(bisection_iterations, bool) or not isinstance(bisection_iterations, int) or bisection_iterations <= 0:
+        raise ValueError("bisection_iterations must be a positive integer")
+    if (not np.all(np.isfinite(curvature)) or not np.all(np.isfinite(gradient))
+            or not np.all(np.isfinite(cap)) or np.any(cap < 0)):
+        raise ValueError("roll-rate speed-limit inputs must be finite with non-negative speed caps")
+
+    limit = np.full(curvature.shape, np.inf, dtype=float)
+    flat_curvature = curvature.ravel()
+    flat_gradient = gradient.ravel()
+    flat_cap = cap.ravel()
+    flat_limit = limit.ravel()
+
+    for index in range(flat_curvature.size):
+        kappa = float(flat_curvature[index])
+        kappa_gradient = float(flat_gradient[index])
+        upper_cap = float(flat_cap[index])
+        if kappa_gradient == 0.0 or upper_cap == 0.0:
+            continue
+
+        if kappa == 0.0:
+            search_upper = upper_cap
+        else:
+            sixty_degree_speed = math.sqrt(math.sqrt(3.0) * gravity_mps2 / abs(kappa))
+            search_upper = min(upper_cap, sixty_degree_speed)
+
+        upper_rate = abs(float(curvature_transition_roll_rate_radps(
+            np.asarray([search_upper]), np.asarray([kappa]), np.asarray([kappa_gradient]),
+            gravity_mps2=gravity_mps2)[0]))
+        if upper_rate <= max_roll_rate_radps:
+            continue
+
+        lower = 0.0
+        upper = search_upper
+        for _ in range(bisection_iterations):
+            middle = 0.5 * (lower + upper)
+            middle_rate = abs(float(curvature_transition_roll_rate_radps(
+                np.asarray([middle]), np.asarray([kappa]), np.asarray([kappa_gradient]),
+                gravity_mps2=gravity_mps2)[0]))
+            if middle_rate <= max_roll_rate_radps:
+                lower = middle
+            else:
+                upper = middle
+        flat_limit[index] = upper
+
+    if np.any(np.isnan(limit)) or np.any(limit <= 0):
+        raise ValueError("roll-rate speed limits must be positive or infinity")
+    limit.setflags(write=False)
+    return limit
 
 
 def roll_rate_excess_radps(demanded_rate_radps: ArrayLike, max_roll_rate_radps: float) -> FloatArray:

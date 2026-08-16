@@ -9,6 +9,11 @@ from math import inf, pi, sqrt
 import numpy as np
 from numba import njit
 
+from motorcycle_lap_sim.motorcycle.roll import (
+    curvature_transition_roll_rate_radps,
+    demanded_lean_rad,
+    roll_rate_speed_limit_mps,
+)
 from motorcycle_lap_sim.path import (
     curvature_gradient_1pm2,
     curvature_transient_speed_limit_mps,
@@ -19,7 +24,6 @@ from .solver import SolverConfig, lap_time_seconds
 
 
 def _parameters(bike):
-    """Flatten a validated configuration into nopython-compatible values."""
     geometry, environment = bike.motorcycle, bike.environment
     powertrain = bike.powertrain
     return (
@@ -46,7 +50,7 @@ def _torque(rpm, idle_rpm, rev_limit_rpm, curve_rpm, curve_torque):
                         / (curve_rpm[index + 1] - curve_rpm[index]))
             return (curve_torque[index]
                     + fraction * (curve_torque[index + 1] - curve_torque[index]))
-    return 0.0  # Unreachable for a configuration validated by the Python layer.
+    return 0.0
 
 
 @njit(cache=True, fastmath=False)
@@ -175,25 +179,33 @@ def _propagate(curvature, segment_lengths, initial_speed, tolerance, max_iterati
 
 
 def forward_acceleration_numba(speed_mps, curvature_1pm, bike):
-    """Return the compiled scalar acceleration, gear number, and engine RPM."""
     return _forward(float(speed_mps), float(curvature_1pm), _parameters(bike))
 
 
 def braking_deceleration_numba(speed_mps, curvature_1pm, bike):
-    """Return the compiled scalar braking-deceleration magnitude."""
     return float(_braking(float(speed_mps), float(curvature_1pm), _parameters(bike)))
 
 
 def solve_speed_profile_numba(path, bike, config=SolverConfig()):
-    """Solve a fixed path using the optional compiled propagation backend."""
     count = len(path.q_m)
     lateral = np.array([lateral_speed_limit_mps(k, bike) for k in path.curvature_1pm])
     power = np.full(count, maximum_rev_limited_speed_mps(bike))
     gradient = curvature_gradient_1pm2(path)
-    transient = (np.full(count, np.inf) if bike.handling is None else
-                 curvature_transient_speed_limit_mps(
-                     path, bike.handling.max_path_curvature_rate_1pmps))
-    initial = np.minimum(np.minimum(lateral, power), transient)
+    handling = bike.handling
+    curvature_limit = (
+        np.full(count, np.inf)
+        if handling is None or handling.max_path_curvature_rate_1pmps is None
+        else curvature_transient_speed_limit_mps(
+            path, handling.max_path_curvature_rate_1pmps))
+    pre_roll_cap = np.minimum(np.minimum(lateral, power), curvature_limit)
+    roll_limit = (
+        np.full(count, np.inf)
+        if handling is None or handling.max_roll_rate_radps is None
+        else roll_rate_speed_limit_mps(
+            path.curvature_1pm, gradient, pre_roll_cap,
+            handling.max_roll_rate_radps,
+            gravity_mps2=bike.environment.gravity_mps2))
+    initial = np.minimum(pre_roll_cap, roll_limit)
     parameters = _parameters(bike)
     speed, iteration, converged = _propagate(
         np.asarray(path.curvature_1pm), np.asarray(path.segment_lengths_m), initial,
@@ -212,11 +224,17 @@ def solve_speed_profile_numba(path, bike, config=SolverConfig()):
                                                    parameters[15], parameters[16], parameters[17],
                                                    parameters[18])
     curvature_rate = speed * gradient
-    arrays = [speed, lateral, power, gradient, curvature_rate, transient,
-              lateral_acceleration, longitudinal, gears, rpms]
+    lean = demanded_lean_rad(
+        speed, path.curvature_1pm, gravity_mps2=bike.environment.gravity_mps2)
+    roll_rate = curvature_transition_roll_rate_radps(
+        speed, path.curvature_1pm, gradient,
+        gravity_mps2=bike.environment.gravity_mps2)
+    arrays = [speed, lateral, power, gradient, curvature_rate, curvature_limit,
+              roll_limit, lean, roll_rate, lateral_acceleration, longitudinal,
+              gears, rpms]
     for array in arrays:
         array.setflags(write=False)
     return SpeedProfileResult(
-        path.q_m, speed, lateral, power, gradient, curvature_rate, transient,
-        lateral_acceleration, longitudinal, gears, rpms,
+        path.q_m, speed, lateral, power, gradient, curvature_rate, curvature_limit,
+        roll_limit, lean, roll_rate, lateral_acceleration, longitudinal, gears, rpms,
         lap_time_seconds(path, speed), iteration, True)
