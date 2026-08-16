@@ -2,15 +2,16 @@
 
 Phase 11A showed that direct 52-control coordinate search from centreline is
 inefficient. This diagnostic changes no physics and introduces no new optimiser.
-It first selects, from a small fixed family of geometry-derived station policies,
-the lowest-control policy whose zero-offset centreline is actually feasible on
-Mallala. It optimises that representation, transfers the result periodically
-onto the reference 52-control policy, and runs the ordinary reference optimiser.
+It first selects, from a small fixed family between the existing coarse and
+reference station policies, the lowest-control policy whose zero-offset
+centreline is actually feasible on Mallala. It optimises that representation,
+transfers the result periodically onto the reference 52-control policy, and runs
+the ordinary reference optimiser.
 
 The existing 150 m / 60 degree coarse policy is intentionally included first.
 If it cannot represent the nominal centreline without spline boundary overshoot,
-that fact is reported rather than hidden. Policies with at least as many controls
-as the reference policy are not eligible for the hierarchy stage.
+that fact is reported rather than hidden. Only lower-dimensional candidates are
+retained in this diagnostic; the reference policy remains the comparison stage.
 """
 
 import argparse
@@ -41,9 +42,6 @@ HIERARCHY_POLICY_CANDIDATES = (
     ("coarse_150m_60deg", COARSE_PLANAR_CONTROL_POLICY),
     ("coarse_150m_45deg", PlanarControlStationPolicy(150.0, math.radians(45.0))),
     ("coarse_125m_45deg", PlanarControlStationPolicy(125.0, math.radians(45.0))),
-    ("coarse_150m_30deg", PlanarControlStationPolicy(150.0, math.radians(30.0))),
-    ("coarse_125m_30deg", PlanarControlStationPolicy(125.0, math.radians(30.0))),
-    ("coarse_110m_45deg", PlanarControlStationPolicy(110.0, math.radians(45.0))),
 )
 
 
@@ -259,7 +257,6 @@ def main(argv=None):
     selected = select_lowest_control_feasible_candidate(
         candidate_rows, len(reference_s))
     hierarchy_policy = selected["policy"]
-    hierarchy_s = selected["stations"]
     print(f"selected_hierarchy_policy={selected['name']}")
     print(f"selected_hierarchy_control_count={selected['control_count']}")
 
