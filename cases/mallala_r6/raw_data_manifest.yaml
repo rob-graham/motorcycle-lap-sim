@@ -1,0 +1,20 @@
+case: mallala_r6
+source_file: "R6 Mallala P4.xlsx"
+source_sha256: "e6d94f3fd0996e59b6fa101af150e662b1248b57ba173f64b5a1ae7399377945"
+source_status: "proprietary_project_input_not_committed"
+source_sheet_for_import: "Updated"
+selected_lap_sheet_present: "Lap5"
+nominal_sample_rate_hz: 20
+session:
+  venue: Mallala
+  vehicle: R6
+  racer_label: Coop
+  event: "SA State Titles"
+  comment: "P4 Friday"
+  date: "2024-05-24"
+notes:
+  - "Manifest records the supplied project workbook without committing the workbook itself."
+  - "The Updated sheet contains 9580 data samples at a continuous 0.05 s interval."
+  - "Lap IDs 1-5 are complete startline-to-startline laps; lap 6 is incomplete."
+  - "The raw ECU GEAR channel contains interpolated fractional values during shifts and must not be forced to integer at import."
+  - "Logger orientation and IMU axis/sign conventions remain incompletely documented."
