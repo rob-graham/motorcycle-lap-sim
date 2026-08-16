@@ -43,12 +43,7 @@ def build_parser():
 
 
 def _interior_positive_laps(session):
-    """Return positive lap-ID runs bounded by data on both sides.
-
-    This is a session-edge completeness check, not a generic proof of lap
-    validity.  For the supplied Mallala session it selects laps 1 through 5 and
-    excludes the leading and trailing partial runs.
-    """
+    """Return positive lap-ID runs bounded by data on both sides."""
     count = len(session.time_s)
     return tuple(lap for lap in lap_slices(session)
                  if lap.start_index > 0 and lap.stop_index < count)
@@ -65,9 +60,6 @@ def _initial_transform(session, laps, track):
         raise ValueError("lap-start GPS heading must be finite for automatic initial registration")
     mean_heading = math.atan2(float(np.mean(np.sin(headings))),
                               float(np.mean(np.cos(headings))))
-    # Track heading is counter-clockwise from local +x.  Rigid2DTransform
-    # bearing is clockwise from north, hence bearing = world heading + local
-    # track heading for the same tangent direction.
     bearing = _normalise_angle(mean_heading + track.start_pose.heading_rad)
     return Rigid2DTransform(
         float(np.median(session.east_m[starts])),
@@ -116,66 +108,110 @@ def _print_heading_summary(headings_rad, peer_deviation_m, quality, indices, bin
             f"speed_accuracy_median_mps={np.nanmedian(quality.speed_accuracy_mps[source]):.9f}")
 
 
-def _flag_runs(mask):
+def _circular_flag_runs(mask):
+    """Return contiguous true index runs, merging a closed-track seam run."""
     values = np.asarray(mask, dtype=bool)
-    starts = np.flatnonzero(values & np.r_[True, ~values[:-1]])
-    stops = np.flatnonzero(values & np.r_[~values[1:], True])
-    return tuple(zip(starts, stops))
+    if values.ndim != 1:
+        raise ValueError("sector mask must be one-dimensional")
+    indices = np.flatnonzero(values)
+    if len(indices) == 0:
+        return ()
+    if np.all(values):
+        return (indices,)
+
+    breaks = np.flatnonzero(np.diff(indices) > 1)
+    runs = [run for run in np.split(indices, breaks + 1) if len(run)]
+    if values[0] and values[-1] and len(runs) > 1:
+        runs[0] = np.concatenate((runs[-1], runs[0]))
+        runs.pop()
+    return tuple(runs)
 
 
-def _bin_run_edges(chainage_m, start_index, stop_index, total_length_m):
+def _bin_run_edges(chainage_m, run, total_length_m):
     chainage = np.asarray(chainage_m, dtype=float)
-    if start_index == 0:
-        lower = 0.0
-    else:
-        lower = 0.5 * (chainage[start_index - 1] + chainage[start_index])
-    if stop_index == len(chainage) - 1:
-        upper = total_length_m
-    else:
-        upper = 0.5 * (chainage[stop_index] + chainage[stop_index + 1])
+    indices = np.asarray(run, dtype=int)
+    start = int(indices[0])
+    stop = int(indices[-1])
+    if start <= stop:
+        lower = 0.0 if start == 0 else 0.5 * (chainage[start - 1] + chainage[start])
+        upper = total_length_m if stop == len(chainage) - 1 else 0.5 * (chainage[stop] + chainage[stop + 1])
+        return float(lower), float(upper)
+
+    # Wrapped run: report the interval as high-chainage:start then 0:low-chainage.
+    lower = 0.5 * (chainage[start - 1] + chainage[start])
+    upper = 0.5 * (chainage[stop] + chainage[stop + 1])
     return float(lower), float(upper)
 
 
-def _corridor_diagnostics(track, offset_envelope):
-    """Compare the measured envelope with nominal model widths without correcting either."""
+def _require_converged_registration(result):
+    if not result.converged:
+        raise RuntimeError(
+            "rigid registration did not converge; refusing downstream map matching and CSV output")
+
+
+def _corridor_diagnostics(track, offset_envelope, eligible_mask):
+    """Compare complete-lap envelope evidence with nominal model widths."""
     reference = sample_track_stations(track, offset_envelope.chainage_m)
+    eligible = np.asarray(eligible_mask, dtype=bool)
+    if eligible.shape != offset_envelope.chainage_m.shape:
+        raise ValueError("corridor eligibility mask must match envelope bins")
+
     median = offset_envelope.median
     p10 = offset_envelope.p10
     p90 = offset_envelope.p90
-    median_excess = np.maximum.reduce((
-        median - reference.width_left_m,
-        -reference.width_right_m - median,
-        np.zeros_like(median),
+    finite = np.isfinite(median) & np.isfinite(p10) & np.isfinite(p90)
+    eligible &= finite
+
+    median_excess = np.full_like(median, np.nan, dtype=float)
+    median_excess[eligible] = np.maximum.reduce((
+        median[eligible] - reference.width_left_m[eligible],
+        -reference.width_right_m[eligible] - median[eligible],
+        np.zeros(np.count_nonzero(eligible), dtype=float),
     ))
-    percentile_touches_outside = ((p90 > reference.width_left_m)
-                                  | (p10 < -reference.width_right_m))
-    percentile_fully_outside = ((p10 > reference.width_left_m)
-                                 | (p90 < -reference.width_right_m))
-    median_outside = median_excess > 0.0
-    worst = int(np.argmax(median_excess))
-    print(f"median_outside_model_corridor_bins={np.count_nonzero(median_outside)}/{len(median)}")
+    percentile_touches_outside = np.zeros(len(median), dtype=bool)
+    percentile_fully_outside = np.zeros(len(median), dtype=bool)
+    percentile_touches_outside[eligible] = (
+        (p90[eligible] > reference.width_left_m[eligible])
+        | (p10[eligible] < -reference.width_right_m[eligible]))
+    percentile_fully_outside[eligible] = (
+        (p10[eligible] > reference.width_left_m[eligible])
+        | (p90[eligible] < -reference.width_right_m[eligible]))
+    median_outside = eligible & (median_excess > 0.0)
+
+    eligible_count = int(np.count_nonzero(eligible))
+    print(f"corridor_eligible_bins={eligible_count}/{len(median)}")
+    print(f"median_outside_model_corridor_bins={np.count_nonzero(median_outside)}/{eligible_count}")
     print(f"p10_p90_touches_outside_model_corridor_bins="
-          f"{np.count_nonzero(percentile_touches_outside)}/{len(median)}")
+          f"{np.count_nonzero(percentile_touches_outside)}/{eligible_count}")
     print(f"p10_p90_fully_outside_model_corridor_bins="
-          f"{np.count_nonzero(percentile_fully_outside)}/{len(median)}")
-    print(f"maximum_median_model_corridor_excess_m={median_excess[worst]:.9f}")
-    print(f"maximum_median_model_corridor_excess_chainage_m={offset_envelope.chainage_m[worst]:.9f}")
+          f"{np.count_nonzero(percentile_fully_outside)}/{eligible_count}")
+
+    if eligible_count == 0:
+        print("maximum_median_model_corridor_excess_m=not_available")
+        print("maximum_median_model_corridor_excess_chainage_m=not_available")
+    else:
+        eligible_indices = np.flatnonzero(eligible)
+        worst = int(eligible_indices[np.argmax(median_excess[eligible])])
+        print(f"maximum_median_model_corridor_excess_m={median_excess[worst]:.9f}")
+        print(f"maximum_median_model_corridor_excess_chainage_m={offset_envelope.chainage_m[worst]:.9f}")
+
     for label, mask in (
             ("median_outside_model_corridor_sector_m", median_outside),
             ("p10_p90_fully_outside_model_corridor_sector_m", percentile_fully_outside)):
-        for start, stop in _flag_runs(mask):
-            lower, upper = _bin_run_edges(
-                offset_envelope.chainage_m, start, stop, track.total_length_m)
-            local_worst = start + int(np.argmax(median_excess[start:stop + 1]))
-            print(f"{label}={lower:.3f}:{upper:.3f} bins={stop - start + 1} "
+        for run in _circular_flag_runs(mask):
+            lower, upper = _bin_run_edges(offset_envelope.chainage_m, run, track.total_length_m)
+            run_values = median_excess[run]
+            local_worst = int(run[np.nanargmax(run_values)])
+            print(f"{label}={lower:.3f}:{upper:.3f} bins={len(run)} "
                   f"maximum_median_excess_m={median_excess[local_worst]:.6f} "
                   f"at_chainage_m={offset_envelope.chainage_m[local_worst]:.3f}")
-    print("corridor_note=consistent measured offsets beyond nominal model width indicate local reference-geometry mismatch, not automatic rider off-track classification")
-    return reference, median_excess, percentile_touches_outside
+    print("corridor_note=only bins containing every selected lap are eligible; consistent measured offsets beyond nominal model width indicate local reference-geometry mismatch, not automatic rider off-track classification")
+    return reference, eligible, median_excess, percentile_touches_outside
 
 
 def _write_envelope_csv(path, offset_envelope, speed_envelope,
-                        corridor_reference, median_excess, percentile_touches_outside):
+                        corridor_reference, corridor_eligible, median_excess,
+                        percentile_touches_outside):
     if not np.allclose(offset_envelope.chainage_m, speed_envelope.chainage_m,
                        rtol=0.0, atol=1e-12):
         raise ValueError("offset and speed envelope chainage grids do not match")
@@ -185,19 +221,21 @@ def _write_envelope_csv(path, offset_envelope, speed_envelope,
             "chainage_m",
             "model_width_left_m", "model_width_right_m",
             "offset_lap_count", "offset_median_m", "offset_p10_m", "offset_p90_m",
-            "offset_min_m", "offset_max_m", "median_model_corridor_excess_m",
-            "p10_p90_touches_outside_model_corridor",
+            "offset_min_m", "offset_max_m", "corridor_evidence_complete",
+            "median_model_corridor_excess_m", "p10_p90_touches_outside_model_corridor",
             "speed_lap_count", "speed_median_mps", "speed_p10_mps", "speed_p90_mps",
             "speed_min_mps", "speed_max_mps",
         ))
         for index, chainage in enumerate(offset_envelope.chainage_m):
+            eligible = bool(corridor_eligible[index])
             writer.writerow((
                 chainage,
                 corridor_reference.width_left_m[index], corridor_reference.width_right_m[index],
                 offset_envelope.lap_count[index], offset_envelope.median[index],
                 offset_envelope.p10[index], offset_envelope.p90[index],
-                offset_envelope.minimum[index], offset_envelope.maximum[index],
-                median_excess[index], int(percentile_touches_outside[index]),
+                offset_envelope.minimum[index], offset_envelope.maximum[index], int(eligible),
+                median_excess[index] if eligible else "",
+                int(percentile_touches_outside[index]) if eligible else "",
                 speed_envelope.lap_count[index], speed_envelope.median[index],
                 speed_envelope.p10[index], speed_envelope.p90[index],
                 speed_envelope.minimum[index], speed_envelope.maximum[index],
@@ -250,19 +288,16 @@ def main(argv=None):
     print(f"initial_bearing_deg={math.degrees(initial.local_x_bearing_rad):.9f}")
 
     result = fit_rigid_registration(
-        session.east_m[indices],
-        session.north_m[indices],
-        sampled_track,
-        initial,
-        valid_mask=registration_valid,
-        trim_fraction=args.trim_fraction,
-        max_iterations=args.max_iterations,
-    )
-    transform = result.transform
+        session.east_m[indices], session.north_m[indices], sampled_track, initial,
+        valid_mask=registration_valid, trim_fraction=args.trim_fraction,
+        max_iterations=args.max_iterations)
     print(f"registration_converged={str(result.converged).lower()}")
     print(f"registration_iterations={result.iterations}")
     print(f"registration_final_translation_delta_m={result.final_translation_delta_m:.9g}")
     print(f"registration_final_bearing_delta_deg={math.degrees(result.final_bearing_delta_rad):.9g}")
+    _require_converged_registration(result)
+
+    transform = result.transform
     print(f"origin_east_m={transform.origin_east_m:.9f}")
     print(f"origin_north_m={transform.origin_north_m:.9f}")
     print(f"local_x_bearing_deg={math.degrees(transform.local_x_bearing_rad):.9f}")
@@ -310,16 +345,18 @@ def main(argv=None):
         lap_chainage, lap_offset, track.total_length_m, bin_width_m=10.0)
     speed_envelope = cross_lap_envelope(
         lap_chainage, lap_speed, track.total_length_m, bin_width_m=10.0)
-    complete_bins = ((offset_envelope.lap_count == len(laps))
-                     & (speed_envelope.lap_count == len(laps)))
+    complete_offset_bins = offset_envelope.lap_count == len(laps)
+    complete_speed_bins = speed_envelope.lap_count == len(laps)
     print(f"envelope_bins={len(offset_envelope.chainage_m)}")
-    print(f"envelope_bins_with_all_laps={np.count_nonzero(complete_bins)}")
-    corridor_reference, median_excess, percentile_touches_outside = _corridor_diagnostics(
-        track, offset_envelope)
+    print(f"offset_envelope_bins_with_all_laps={np.count_nonzero(complete_offset_bins)}")
+    print(f"speed_envelope_bins_with_all_laps={np.count_nonzero(complete_speed_bins)}")
+    corridor_reference, corridor_eligible, median_excess, percentile_touches_outside = (
+        _corridor_diagnostics(track, offset_envelope, complete_offset_bins))
     if args.envelope_csv is not None:
         _write_envelope_csv(
             args.envelope_csv, offset_envelope, speed_envelope,
-            corridor_reference, median_excess, percentile_touches_outside)
+            corridor_reference, corridor_eligible, median_excess,
+            percentile_touches_outside)
         print(f"envelope_csv={args.envelope_csv}")
 
 
