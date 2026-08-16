@@ -14,6 +14,7 @@ _REQUIRED_HEADERS = (
     "GPS LatAcc", "GPS LonAcc", "GPS Slope", "GPS Heading", "GPS Gyro",
     "GPS Latitude", "GPS Longitude", "RollRate", "PitchRate", "YawRate",
     "ECU RPM", "ECU GEAR", "ECU THROTTLE", "ECU TPS HAND", "Dist from Start",
+    "Startline", "Lap",
 )
 
 
@@ -47,6 +48,10 @@ def load_aim_workbook(path, *, sheet_name="Updated") -> TelemetrySession:
     supplied AiM workbook contains interpolated fractional values during gear
     transitions. Stable integer gear classification belongs in later telemetry
     cleaning/validation rather than the file importer.
+
+    `Startline` and `Lap` are resolved by header like every other required
+    channel. This prevents column insertion/reordering from silently changing
+    lap segmentation.
     """
     try:
         from openpyxl import load_workbook
@@ -88,8 +93,6 @@ def load_aim_workbook(path, *, sheet_name="Updated") -> TelemetrySession:
     markers = []
     lap_ids = []
 
-    marker_index = 20 if len(headers) > 20 else None
-    lap_index = 21 if len(headers) > 21 else None
     for row in sheet.iter_rows(min_row=3, values_only=True):
         if all(value is None for value in row):
             continue
@@ -114,10 +117,9 @@ def load_aim_workbook(path, *, sheet_name="Updated") -> TelemetrySession:
         ecu_throttle_rad.append(math.radians(_number(value("ECU THROTTLE"))))
         hand_throttle_fraction.append(_number(value("ECU TPS HAND")) / 100.0)
         distance_from_start_m.append(_number(value("Dist from Start")))
-        marker = row[marker_index] if marker_index is not None and marker_index < len(row) else None
+        marker = value("Startline")
         markers.append(None if marker in (None, "") else str(marker))
-        lap_value = row[lap_index] if lap_index is not None and lap_index < len(row) else None
-        lap_ids.append(_integer(lap_value))
+        lap_ids.append(_integer(value("Lap")))
 
     array = lambda values: np.asarray(values, dtype=float)
     return TelemetrySession(
