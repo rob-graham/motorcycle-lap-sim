@@ -23,6 +23,7 @@ ROOT = Path(__file__).parents[1]
 def test_frozen_controls_have_expected_identity_station_policy_and_bounds():
     controls_path = ROOT / MODULE.DEFAULT_CONTROLS
     track_path = ROOT / MODULE.DEFAULT_TRACK
+    motorcycle_path = ROOT / MODULE.DEFAULT_MOTORCYCLE
     track = Track.from_yaml(track_path)
     stations = generate_planar_control_stations(track, REFERENCE_PLANAR_CONTROL_POLICY)
     lower, upper = planar_control_bounds(track, stations, MODULE.BOUNDARY_MARGIN_M)
@@ -30,6 +31,8 @@ def test_frozen_controls_have_expected_identity_station_policy_and_bounds():
     controls = MODULE.load_frozen_controls(controls_path, stations, lower, upper)
 
     assert MODULE.sha256_file(controls_path) == MODULE.EXPECTED_CONTROLS_SHA256
+    assert MODULE.sha256_file(track_path) == MODULE.EXPECTED_TRACK_SHA256
+    assert MODULE.sha256_file(motorcycle_path) == MODULE.EXPECTED_MOTORCYCLE_SHA256
     assert len(stations) == MODULE.EXPECTED_CONTROL_COUNT == 52
     assert np.all(controls >= lower)
     assert np.all(controls <= upper)
@@ -53,12 +56,21 @@ def test_frozen_controls_reject_changed_stored_bound(tmp_path):
         MODULE.load_frozen_controls(changed, stations, lower, upper)
 
 
-def test_frozen_baseline_fixed_geometry_evaluates_at_all_documented_resolutions(monkeypatch):
+def test_frozen_baseline_matches_executable_regression(monkeypatch):
     monkeypatch.chdir(ROOT)
     _, stations, controls, evaluations = MODULE.evaluate_baseline(speed_backend="python")
 
     assert len(stations) == len(controls) == 52
     assert len(evaluations) == len(MODULE.OUTPUT_SPACINGS_M) == 3
     assert all(evaluation.feasible for evaluation in evaluations)
-    assert all(np.isfinite(evaluation.lap_time_s) for evaluation in evaluations)
-    assert all(evaluation.lap_time_s > 0.0 for evaluation in evaluations)
+
+    controls_hash = MODULE.sha256_file(MODULE.DEFAULT_CONTROLS)
+    track_hash = MODULE.sha256_file(MODULE.DEFAULT_TRACK)
+    motorcycle_hash = MODULE.sha256_file(MODULE.DEFAULT_MOTORCYCLE)
+    MODULE.verify_default_regression(
+        controls_hash, track_hash, motorcycle_hash, evaluations)
+
+    actual_laps = tuple(evaluation.lap_time_s for evaluation in evaluations)
+    assert actual_laps == pytest.approx(MODULE.EXPECTED_LAP_TIMES_S, abs=MODULE.LAP_TIME_ATOL_S)
+    assert actual_laps[0] == pytest.approx(
+        MODULE.HISTORICAL_REFERENCE_LABEL_LAP_S, abs=MODULE.LAP_TIME_ATOL_S)
