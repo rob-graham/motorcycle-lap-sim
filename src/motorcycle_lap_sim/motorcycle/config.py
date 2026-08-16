@@ -82,9 +82,26 @@ class PowertrainConfig:
 
 @dataclass(frozen=True)
 class HandlingConfig:
-    """Optional path-handling proxy parameters (not steering dynamics)."""
+    """Optional simple path-response limits (not full steering dynamics).
 
-    max_path_curvature_rate_1pmps: float
+    The first field remains the historical positional argument so existing
+    ``HandlingConfig(0.8)`` callers continue to select the curvature-rate proxy.
+    Either field may be used independently, or both may be combined.
+    """
+
+    max_path_curvature_rate_1pmps: float | None = None
+    max_roll_rate_radps: float | None = None
+
+    def __post_init__(self) -> None:
+        values = (
+            (self.max_path_curvature_rate_1pmps, "max_path_curvature_rate_1pmps"),
+            (self.max_roll_rate_radps, "max_roll_rate_radps"),
+        )
+        if all(value is None for value, _ in values):
+            raise ValueError("handling must define at least one response limit")
+        for value, name in values:
+            if value is not None:
+                _positive(value, name)
 
 
 @dataclass(frozen=True)
@@ -113,9 +130,17 @@ def motorcycle_config_from_dict(data: Mapping[str, Any]) -> MotorcycleConfig:
     handling_raw = data.get("handling")
     if "handling" in data and not isinstance(handling_raw, Mapping):
         raise ValueError("handling must be a mapping")
-    handling = (None if handling_raw is None else HandlingConfig(_positive(
-        handling_raw.get("max_path_curvature_rate_1pmps"),
-        "max_path_curvature_rate_1pmps")))
+    if handling_raw is None:
+        handling = None
+    else:
+        curvature_rate_raw = handling_raw.get("max_path_curvature_rate_1pmps")
+        roll_rate_raw = handling_raw.get("max_roll_rate_radps")
+        handling = HandlingConfig(
+            None if curvature_rate_raw is None else _positive(
+                curvature_rate_raw, "max_path_curvature_rate_1pmps"),
+            None if roll_rate_raw is None else _positive(
+                roll_rate_raw, "max_roll_rate_radps"),
+        )
 
     environment = EnvironmentConfig(
         _positive(env.get("gravity_mps2"), "gravity_mps2"),
