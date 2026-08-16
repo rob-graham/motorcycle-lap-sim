@@ -36,6 +36,18 @@ def test_bounded_smooth_perturbation_is_deterministic_bounded_and_bidirectional(
     assert np.max(np.abs(plus_a)) <= 0.6 + 1e-12
 
 
+def test_backoff_to_feasible_uses_first_accepted_scale():
+    diagnostic = _load_script()
+    proposed = np.array([2.0, -2.0])
+    fallback = np.zeros(2)
+
+    candidate, scale = diagnostic.backoff_to_feasible(
+        proposed, fallback, lambda values: np.max(np.abs(values)) <= 0.5)
+
+    assert scale == 0.25
+    assert np.allclose(candidate, [0.5, -0.5])
+
+
 def test_rank_candidates_uses_common_grid_and_stable_name_tie_break():
     diagnostic = _load_script()
     rows = [
