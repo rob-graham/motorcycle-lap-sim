@@ -1,11 +1,16 @@
-"""Test coarse-to-reference warm-starting for Mallala from a generic centreline.
+"""Test lower-dimensional-to-reference warm-starting for Mallala from centreline.
 
 Phase 11A showed that direct 52-control coordinate search from centreline is
-inefficient. This diagnostic changes no physics and introduces no new optimiser:
-it first optimises the existing coarse planar control policy, transfers that
-result periodically onto the reference 52-control policy, and then runs the
-ordinary reference-policy optimiser. The final result is re-ranked on the same
-0.25 m Python grid used for optimisation assurance.
+inefficient. This diagnostic changes no physics and introduces no new optimiser.
+It first selects, from a small fixed family of geometry-derived station policies,
+the lowest-control policy whose zero-offset centreline is actually feasible on
+Mallala. It optimises that representation, transfers the result periodically
+onto the reference 52-control policy, and runs the ordinary reference optimiser.
+
+The existing 150 m / 60 degree coarse policy is intentionally included first.
+If it cannot represent the nominal centreline without spline boundary overshoot,
+that fact is reported rather than hidden. Policies with at least as many controls
+as the reference policy are not eligible for the hierarchy stage.
 """
 
 import argparse
@@ -21,6 +26,7 @@ from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle
 from motorcycle_lap_sim.optimisation import (
     COARSE_PLANAR_CONTROL_POLICY,
     REFERENCE_PLANAR_CONTROL_POLICY,
+    PlanarControlStationPolicy,
     PlanarOptimisationConfig,
     evaluate_planar_racing_line,
     generate_planar_control_stations,
@@ -31,6 +37,14 @@ from motorcycle_lap_sim.track import Track
 
 
 DEFAULT_RANKING_SPACING_M = 0.25
+HIERARCHY_POLICY_CANDIDATES = (
+    ("coarse_150m_60deg", COARSE_PLANAR_CONTROL_POLICY),
+    ("coarse_150m_45deg", PlanarControlStationPolicy(150.0, math.radians(45.0))),
+    ("coarse_125m_45deg", PlanarControlStationPolicy(125.0, math.radians(45.0))),
+    ("coarse_150m_30deg", PlanarControlStationPolicy(150.0, math.radians(30.0))),
+    ("coarse_125m_30deg", PlanarControlStationPolicy(125.0, math.radians(30.0))),
+    ("coarse_110m_45deg", PlanarControlStationPolicy(110.0, math.radians(45.0))),
+)
 
 
 def _load_sibling(filename, module_name):
@@ -109,18 +123,63 @@ def periodic_linear_transfer(source_s_m, source_controls_m, target_s_m, lap_leng
     return np.interp(wrapped_target, extended_s, extended_controls)
 
 
-def _evaluate(track, bike, stations, controls, spacing):
-    evaluation = evaluate_planar_racing_line(
+def select_lowest_control_feasible_candidate(candidate_rows, reference_control_count):
+    """Select the lowest-dimensional feasible candidate below reference count."""
+    eligible = [
+        row for row in candidate_rows
+        if row["feasible"] and row["control_count"] < reference_control_count
+    ]
+    if not eligible:
+        raise RuntimeError(
+            "no tested hierarchy policy with fewer controls than the reference policy "
+            "can represent a feasible zero-offset Mallala centreline")
+    return min(eligible, key=lambda row: (row["control_count"], row["order"]))
+
+
+def _raw_evaluate(track, bike, stations, controls, spacing):
+    return evaluate_planar_racing_line(
         controls, track, bike, stations,
         sample_spacing_m=spacing,
         boundary_margin_m=phase9.BOUNDARY_MARGIN_M,
         boundary_check_spacing_m=phase9.BOUNDARY_CHECK_SPACING_M,
         speed_backend="python",
     )
+
+
+def _evaluate(track, bike, stations, controls, spacing):
+    evaluation = _raw_evaluate(track, bike, stations, controls, spacing)
     if not evaluation.feasible or evaluation.smooth_line is None or evaluation.speed_profile is None:
         raise RuntimeError(
             f"candidate controls are infeasible at {spacing:.3f} m: {evaluation.failure_reason}")
     return evaluation
+
+
+def _centreline_candidate(track, bike, name, policy, order, ranking_spacing_m):
+    stations = generate_planar_control_stations(track, policy)
+    lower, upper = planar_control_bounds(track, stations, phase9.BOUNDARY_MARGIN_M)
+    centreline = np.clip(np.zeros_like(stations), lower, upper)
+    failures = []
+    lap_time_s = math.inf
+    for spacing in tuple(sorted({1.0, ranking_spacing_m})):
+        evaluation = _raw_evaluate(track, bike, stations, centreline, spacing)
+        if (not evaluation.feasible or evaluation.smooth_line is None
+                or evaluation.speed_profile is None):
+            failures.append(f"{spacing:.3f}m:{evaluation.failure_reason}")
+        elif spacing == ranking_spacing_m:
+            lap_time_s = evaluation.lap_time_s
+    return {
+        "name": name,
+        "policy": policy,
+        "order": order,
+        "stations": stations,
+        "lower": lower,
+        "upper": upper,
+        "centreline": centreline,
+        "control_count": len(stations),
+        "feasible": not failures,
+        "failure_reason": " | ".join(failures) if failures else "",
+        "common_grid_lap_s": lap_time_s,
+    }
 
 
 def _config(args, max_evaluations, max_sweeps):
@@ -163,11 +222,6 @@ def main(argv=None):
     bike = replace(
         base_bike, handling=HandlingConfig(max_roll_rate_radps=args.max_roll_rate_radps))
 
-    coarse_s = generate_planar_control_stations(track, COARSE_PLANAR_CONTROL_POLICY)
-    coarse_lower, coarse_upper = planar_control_bounds(
-        track, coarse_s, phase9.BOUNDARY_MARGIN_M)
-    coarse_centreline = np.clip(np.zeros_like(coarse_s), coarse_lower, coarse_upper)
-
     reference_s = generate_planar_control_stations(track, REFERENCE_PLANAR_CONTROL_POLICY)
     reference_lower, reference_upper = planar_control_bounds(
         track, reference_s, phase9.BOUNDARY_MARGIN_M)
@@ -182,36 +236,52 @@ def main(argv=None):
     print(f"reviewed_reference_controls_sha256={phase9.sha256_file(args.reviewed_reference_controls_csv)}")
     print(f"max_roll_rate_radps={args.max_roll_rate_radps:.9f}")
     print("scenario_note=finite roll rate is a sensitivity scenario, not a calibrated R6/rider constant")
-    print(f"coarse_control_count={len(coarse_s)}")
     print(f"reference_control_count={len(reference_s)}")
     print(f"workers={args.workers}")
     print(f"speed_backend={args.speed_backend}")
     print(f"common_ranking_spacing_m={args.ranking_spacing_m:.3f}")
 
-    coarse = _run(
-        "coarse_from_centreline", track, bike, COARSE_PLANAR_CONTROL_POLICY,
+    candidate_rows = []
+    for order, (name, policy) in enumerate(HIERARCHY_POLICY_CANDIDATES):
+        row = _centreline_candidate(
+            track, bike, name, policy, order, args.ranking_spacing_m)
+        candidate_rows.append(row)
+        status = "feasible" if row["feasible"] else "infeasible"
+        print(
+            f"hierarchy_policy_candidate={name} controls={row['control_count']} "
+            f"status={status} max_spacing_m={policy.max_spacing_m:.3f} "
+            f"max_arc_heading_change_deg={math.degrees(policy.max_arc_heading_change_rad):.3f}")
+        if row["feasible"]:
+            print(f"hierarchy_policy_candidate_common_grid_lap_s={row['common_grid_lap_s']:.9f}")
+        else:
+            print(f"hierarchy_policy_candidate_failure={row['failure_reason']}")
+
+    selected = select_lowest_control_feasible_candidate(
+        candidate_rows, len(reference_s))
+    hierarchy_policy = selected["policy"]
+    hierarchy_s = selected["stations"]
+    print(f"selected_hierarchy_policy={selected['name']}")
+    print(f"selected_hierarchy_control_count={selected['control_count']}")
+
+    hierarchy = _run(
+        "hierarchy_from_centreline", track, bike, hierarchy_policy,
         _config(args, args.coarse_max_evaluations, args.coarse_max_sweeps),
-        coarse_centreline,
+        selected["centreline"],
     )
     phase8.atomic_write_controls_csv(
-        args.output_dir / "coarse_final_controls.csv",
-        coarse.control_s_m, coarse.best_controls_m,
-        coarse.lower_bounds_m, coarse.upper_bounds_m,
+        args.output_dir / "hierarchy_final_controls.csv",
+        hierarchy.control_s_m, hierarchy.best_controls_m,
+        hierarchy.lower_bounds_m, hierarchy.upper_bounds_m,
     )
 
     proposed_reference = periodic_linear_transfer(
-        coarse.control_s_m, coarse.best_controls_m, reference_s, track.total_length_m)
+        hierarchy.control_s_m, hierarchy.best_controls_m,
+        reference_s, track.total_length_m)
     proposed_reference = np.clip(proposed_reference, reference_lower, reference_upper)
 
     def reference_feasible(controls):
-        for spacing in (1.0, args.ranking_spacing_m):
-            evaluation = evaluate_planar_racing_line(
-                controls, track, bike, reference_s,
-                sample_spacing_m=spacing,
-                boundary_margin_m=phase9.BOUNDARY_MARGIN_M,
-                boundary_check_spacing_m=phase9.BOUNDARY_CHECK_SPACING_M,
-                speed_backend="python",
-            )
+        for spacing in tuple(sorted({1.0, args.ranking_spacing_m})):
+            evaluation = _raw_evaluate(track, bike, reference_s, controls, spacing)
             if (not evaluation.feasible or evaluation.smooth_line is None
                     or evaluation.speed_profile is None):
                 return False
@@ -220,14 +290,14 @@ def main(argv=None):
     transferred, transfer_scale = phase11a.backoff_to_feasible(
         proposed_reference, reference_centreline, reference_feasible)
     if transfer_scale == 0.0:
-        raise RuntimeError("coarse-to-reference transfer collapsed to centreline")
+        raise RuntimeError("hierarchy-to-reference transfer collapsed to centreline")
     transferred_common = _evaluate(
         track, bike, reference_s, transferred, args.ranking_spacing_m)
-    print(f"coarse_to_reference_feasibility_scale={transfer_scale:.6f}")
+    print(f"hierarchy_to_reference_feasibility_scale={transfer_scale:.6f}")
     print(f"transferred_reference_common_grid_lap_s={transferred_common.lap_time_s:.9f}")
 
     reference = _run(
-        "reference_from_coarse_transfer", track, bike, REFERENCE_PLANAR_CONTROL_POLICY,
+        "reference_from_hierarchy_transfer", track, bike, REFERENCE_PLANAR_CONTROL_POLICY,
         _config(args, args.reference_max_evaluations, args.reference_max_sweeps),
         transferred,
     )
@@ -249,7 +319,7 @@ def main(argv=None):
     print(f"hierarchical_minus_reviewed_s={delta_lap:.9f}")
     print(f"maximum_abs_control_delta_to_reviewed_m={np.max(np.abs(delta_controls)):.9f}")
     print(f"rms_control_delta_to_reviewed_m={np.sqrt(np.mean(delta_controls ** 2)):.9f}")
-    print("interpretation_note=if a generic centreline reaches a comparably good reference-policy result through the existing coarse-to-reference hierarchy at reasonable cost, prescribe hierarchical warm-starting before considering a new optimiser algorithm")
+    print("interpretation_note=this bounded test first requires a lower-dimensional control policy that can represent the nominal centreline; if hierarchy warm-starting then reaches a comparably good reference-policy result at reasonable cost, prescribe it before considering a new optimiser algorithm")
     print("calibration_note=no motorcycle, rider, track, or roll-rate parameter is fitted by this command")
 
 
