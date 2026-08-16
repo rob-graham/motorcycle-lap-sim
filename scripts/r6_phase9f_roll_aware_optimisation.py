@@ -18,6 +18,7 @@ from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle
 from motorcycle_lap_sim.optimisation import (
     PlanarOptimisationConfig,
     REFERENCE_PLANAR_CONTROL_POLICY,
+    evaluate_planar_racing_line,
     generate_planar_control_stations,
     optimise_planar_racing_line,
     planar_control_bounds,
@@ -58,6 +59,10 @@ def build_parser():
     parser.add_argument("--initial-step-m", type=_positive_float, default=1.0)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--speed-backend", choices=("python", "numba"), default="python")
+    parser.add_argument(
+        "--initial-controls-csv", type=Path,
+        help="strict same-policy controls CSV used to restart from an earlier Phase 9F result",
+    )
     parser.add_argument("--checkpoint-controls-csv", type=Path)
     return parser
 
@@ -83,6 +88,20 @@ def _binding_roll_count(speed_profile):
     return int(np.count_nonzero(binding)), len(binding)
 
 
+def _evaluate_controls(track, bike, stations, controls, spacing):
+    evaluation = evaluate_planar_racing_line(
+        controls, track, bike, stations,
+        sample_spacing_m=spacing,
+        boundary_margin_m=phase9.BOUNDARY_MARGIN_M,
+        boundary_check_spacing_m=phase9.BOUNDARY_CHECK_SPACING_M,
+        speed_backend="python",
+    )
+    if not evaluation.feasible or evaluation.smooth_line is None or evaluation.speed_profile is None:
+        raise RuntimeError(
+            f"saved controls are infeasible at {spacing:.2f} m: {evaluation.failure_reason}")
+    return evaluation
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.max_evaluations <= 0 or args.max_sweeps <= 0 or args.workers <= 0:
@@ -100,6 +119,16 @@ def main(argv=None):
     lower, upper = planar_control_bounds(track, stations, phase9.BOUNDARY_MARGIN_M)
     frozen_controls = phase9.load_frozen_controls(
         phase9.DEFAULT_CONTROLS, stations, lower, upper)
+    if args.initial_controls_csv is None:
+        initial_controls = frozen_controls
+        initial_source = str(phase9.DEFAULT_CONTROLS)
+    else:
+        initial_controls = phase8.load_initial_controls_csv(
+            args.initial_controls_csv, stations, lower, upper)
+        initial_source = str(args.initial_controls_csv)
+
+    fixed_frozen = _evaluate_controls(
+        track, bike, stations, frozen_controls, spacing=1.0)
 
     config = PlanarOptimisationConfig(
         initial_step_m=args.initial_step_m,
@@ -120,7 +149,7 @@ def main(argv=None):
 
     result = optimise_planar_racing_line(
         track, bike, REFERENCE_PLANAR_CONTROL_POLICY, config,
-        initial_controls_m=frozen_controls,
+        initial_controls_m=initial_controls,
         progress_callback=callback,
     )
 
@@ -131,15 +160,20 @@ def main(argv=None):
 
     delta = result.best_controls_m - frozen_controls
     binding, samples = _binding_roll_count(result.speed_profile)
+    total_improvement = fixed_frozen.lap_time_s - result.best_lap_time_s
     print(f"max_roll_rate_radps={args.max_roll_rate_radps:.9f}")
     print("scenario_note=finite roll rate is a sensitivity scenario, not a calibrated R6/rider constant")
     print(f"speed_backend={args.speed_backend}")
     print(f"workers={args.workers}")
     print(f"control_count={len(result.control_s_m)}")
-    print(f"fixed_frozen_line_with_roll_lap_s={result.initial_lap_time_s:.9f}")
+    print(f"initial_controls_source={initial_source}")
+    print(f"fixed_frozen_line_with_roll_lap_s={fixed_frozen.lap_time_s:.9f}")
+    print(f"restart_initial_line_with_roll_lap_s={result.initial_lap_time_s:.9f}")
     print(f"roll_aware_optimised_lap_s={result.best_lap_time_s:.9f}")
-    print(f"line_adaptation_improvement_s={result.improvement_s:.9f}")
-    print(f"line_adaptation_improvement_percent={result.improvement_percent:.9f}")
+    print(f"restart_improvement_s={result.improvement_s:.9f}")
+    print(f"total_line_adaptation_improvement_from_frozen_s={total_improvement:.9f}")
+    print("total_line_adaptation_improvement_from_frozen_percent="
+          f"{100.0 * total_improvement / fixed_frozen.lap_time_s:.9f}")
     print(f"evaluations={result.evaluations}")
     print(f"sweeps={result.sweeps}")
     print(f"final_step_m={result.final_step_m:.9f}")
@@ -153,13 +187,24 @@ def main(argv=None):
     print(f"output_controls_csv={args.output_controls_csv}")
 
     for spacing in phase9.OUTPUT_SPACINGS_M:
+        frozen = _evaluate_controls(
+            track, bike, stations, frozen_controls, spacing)
         path, speed = resample_planar_result(result, bike, spacing)
-        spacing_binding, spacing_samples = _binding_roll_count(speed)
+        frozen_binding, frozen_samples = _binding_roll_count(frozen.speed_profile)
+        optimised_binding, optimised_samples = _binding_roll_count(speed)
+        spacing_improvement = frozen.lap_time_s - speed.lap_time_s
         print(
-            f"resample_spacing_m={spacing:.2f} lap_s={speed.lap_time_s:.9f} "
-            f"path_length_m={path.total_length_m:.9f} "
-            f"binding_roll_ceiling_samples={spacing_binding}/{spacing_samples} "
-            f"maximum_level1_demanded_roll_rate_radps="
+            f"grid_spacing_m={spacing:.2f} "
+            f"frozen_lap_s={frozen.lap_time_s:.9f} "
+            f"roll_aware_lap_s={speed.lap_time_s:.9f} "
+            f"line_adaptation_improvement_s={spacing_improvement:.9f} "
+            f"frozen_path_length_m={frozen.smooth_line.sampled_path.total_length_m:.9f} "
+            f"roll_aware_path_length_m={path.total_length_m:.9f} "
+            f"frozen_binding_roll_samples={frozen_binding}/{frozen_samples} "
+            f"roll_aware_binding_roll_samples={optimised_binding}/{optimised_samples} "
+            f"frozen_maximum_level1_roll_rate_radps="
+            f"{np.max(np.abs(frozen.speed_profile.demanded_roll_rate_radps)):.9f} "
+            f"roll_aware_maximum_level1_roll_rate_radps="
             f"{np.max(np.abs(speed.demanded_roll_rate_radps)):.9f}")
 
 
