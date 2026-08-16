@@ -275,6 +275,21 @@ class PlanarOptimisationResult:
             object.__setattr__(self, name, immutable_array(getattr(self, name)))
 
 
+@dataclass(frozen=True)
+class PlanarOptimisationProgress:
+    """Immutable accepted state after one complete search poll."""
+
+    best_controls_m: NDArray[np.float64]
+    lap_time_s: float
+    evaluations: int
+    sweeps: int
+    step_m: float
+    improved: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "best_controls_m", immutable_array(self.best_controls_m))
+
+
 def _periodic_search_directions(control_count: int) -> tuple[NDArray[np.float64], ...]:
     """Return deterministic unit-peak coordinate and smooth periodic directions."""
     directions: list[NDArray[np.float64]] = []
@@ -300,7 +315,8 @@ def _best_improvement_pattern_search(
         upper: NDArray[np.float64], initial_evaluation, evaluate: Callable,
         config: PlanarOptimisationConfig,
         evaluate_candidates: Callable[[Iterable[NDArray[np.float64]]],
-                                      Iterable[PlanarObjectiveEvaluation]] | None = None):
+                                      Iterable[PlanarObjectiveEvaluation]] | None = None,
+        progress_callback: Callable[[PlanarOptimisationProgress], None] | None = None):
     """Poll all coordinate/coupled moves and accept only the best candidate.
 
     Direction and sign order provide deterministic tie-breaking.  A single
@@ -345,6 +361,7 @@ def _best_improvement_pattern_search(
         polls += 1
         improving = [item for item in candidates if item[4].feasible and
                      item[0] < best.lap_time_s - config.lap_time_improvement_tolerance_s]
+        poll_improved = bool(improving)
         if improving:
             _, _, _, controls, best, accepted_direction = min(
                 improving, key=lambda item: (item[0], item[1], item[2]))
@@ -361,7 +378,11 @@ def _best_improvement_pattern_search(
             step *= config.step_reduction
             if step < config.minimum_step_m:
                 reason = "minimum step reached"
-                break
+        if progress_callback is not None:
+            progress_callback(PlanarOptimisationProgress(
+                controls, best.lap_time_s, evaluations, polls, step, poll_improved))
+        if reason == "minimum step reached":
+            break
         if evaluations >= config.max_evaluations:
             reason = "maximum evaluations reached"
             break
@@ -372,6 +393,7 @@ def optimise_planar_racing_line(track: Track, motorcycle,
                                 policy: PlanarControlStationPolicy = REFERENCE_PLANAR_CONTROL_POLICY,
                                 config: PlanarOptimisationConfig = PlanarOptimisationConfig(),
                                 initial_controls_m: ArrayLike | None = None,
+                                progress_callback: Callable[[PlanarOptimisationProgress], None] | None = None,
                                 ) -> PlanarOptimisationResult:
     """Optimise physical controls, optionally resuming from a supplied candidate.
 
@@ -405,7 +427,8 @@ def optimise_planar_racing_line(track: Track, motorcycle,
 
     if config.parallel_workers == 1:
         controls, best, evaluations, sweeps, step, reason = _best_improvement_pattern_search(
-            controls, lower, upper, initial, evaluate, config)
+            controls, lower, upper, initial, evaluate, config,
+            progress_callback=progress_callback)
     else:
         # One persistent pool serves every complete poll.  Pattern moves remain
         # single parent-process evaluations because they are not parallel work.
@@ -422,7 +445,7 @@ def optimise_planar_racing_line(track: Track, motorcycle,
                 _best_improvement_pattern_search(
                     controls, lower, upper, initial, evaluate, config,
                     lambda candidates: executor.map(
-                        _evaluate_planar_worker, candidates)))
+                        _evaluate_planar_worker, candidates), progress_callback))
     assert best.smooth_line is not None and best.speed_profile is not None
     if config.speed_backend == "numba":
         # Validate only the accepted result, on the identical saved smooth path.

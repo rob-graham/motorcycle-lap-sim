@@ -121,3 +121,20 @@ physical control vector, while `--initial-step-m` explicitly restores a known
 search step (and defaults to `1.0` m when omitted). Evaluation count, sweep
 count, and process-pool state begin fresh from the current
 `PlanarOptimisationConfig`. The restart CSV format is unchanged.
+
+## Warm-start checkpoints
+
+Long targeted runs may pass `--checkpoint-controls-csv PATH`. After every
+complete poll (and its optional pattern move), the parent process atomically
+replaces this file in the strict controls format accepted by
+`--initial-controls-csv`. For example:
+
+```text
+python scripts/r6_phase8_planar_optimisation_check.py --track mallala --policy reference --checkpoint-controls-csv mallala-checkpoint.csv
+```
+
+This is a **warm-start checkpoint**, not exact optimiser resume. Restarting
+restores accepted controls, but does not restore the evaluation count or sweep
+count and does not automatically restore the search step. The diagnostic logs
+those values; supply its recorded step manually with `--initial-step-m` when
+desired. It is therefore not claimed to be an exact uninterrupted continuation.
