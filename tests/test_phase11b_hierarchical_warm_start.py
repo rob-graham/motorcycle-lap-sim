@@ -47,3 +47,28 @@ def test_periodic_linear_transfer_rejects_unsorted_sources():
             np.array([10.0]),
             100.0,
         )
+
+
+def test_select_lowest_control_feasible_candidate_prefers_dimension_then_order():
+    diagnostic = _load_script()
+    rows = [
+        {"name": "first_45", "control_count": 45, "feasible": True, "order": 0},
+        {"name": "second_45", "control_count": 45, "feasible": True, "order": 1},
+        {"name": "forty", "control_count": 40, "feasible": True, "order": 2},
+        {"name": "thirty_infeasible", "control_count": 30, "feasible": False, "order": 3},
+    ]
+
+    selected = diagnostic.select_lowest_control_feasible_candidate(rows, 52)
+
+    assert selected["name"] == "forty"
+
+
+def test_select_lowest_control_feasible_candidate_rejects_reference_sized_only():
+    diagnostic = _load_script()
+    rows = [
+        {"name": "infeasible_small", "control_count": 41, "feasible": False, "order": 0},
+        {"name": "reference_sized", "control_count": 52, "feasible": True, "order": 1},
+    ]
+
+    with pytest.raises(RuntimeError, match="fewer controls than the reference policy"):
+        diagnostic.select_lowest_control_feasible_candidate(rows, 52)
