@@ -7,6 +7,7 @@ and compares that profile with the post-registration measured speed envelope.
 
 import argparse
 import csv
+import hashlib
 import math
 from pathlib import Path
 
@@ -34,10 +35,32 @@ def build_parser():
     parser.add_argument("envelope_csv", type=Path,
                         help="post-registration Phase 10 envelope CSV")
     parser.add_argument("--required-lap-count", type=int, default=5)
+    parser.add_argument("--expected-complete-lap-bins", type=int, default=None,
+                        help="optional fail-closed check against a previously reviewed envelope run")
     parser.add_argument("--sim-spacing-m", type=float, default=1.0,
                         help="frozen fixed-line output spacing; must be 1.0, 0.5 or 0.25 m")
     parser.add_argument("--comparison-csv", type=Path, default=None)
     return parser
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _require_expected_complete_bins(actual, total, expected):
+    if expected is None:
+        return
+    if expected < 0 or expected > total:
+        raise ValueError("expected-complete-lap-bins must lie between zero and comparison bin count")
+    if actual != expected:
+        raise RuntimeError(
+            f"measured envelope has {actual}/{total} complete-lap speed bins, expected "
+            f"{expected}/{total}; refusing comparison because the CSV may be stale, from "
+            "different registration/filter settings, or otherwise not the reviewed input")
 
 
 def _load_measured_speed_envelope(path):
@@ -122,6 +145,7 @@ def _write_comparison_csv(path, comparison):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    envelope_hash = _sha256_file(args.envelope_csv)
     chainage, median, p10, p90, lap_count = _load_measured_speed_envelope(args.envelope_csv)
     track, evaluation, simulated_s, simulated_speed = _simulation_at_spacing(args.sim_spacing_m)
     comparison = compare_speed_envelope(
@@ -130,8 +154,11 @@ def main(argv=None):
         required_lap_count=args.required_lap_count,
     )
     summary = summarize_speed_comparison(comparison)
+    _require_expected_complete_bins(
+        summary.eligible_bins, len(comparison.chainage_m), args.expected_complete_lap_bins)
 
     print(f"envelope_csv={args.envelope_csv}")
+    print(f"envelope_sha256={envelope_hash}")
     print(f"required_lap_count={args.required_lap_count}")
     print(f"sim_spacing_m={args.sim_spacing_m:.2f}")
     print(f"simulated_fixed_line_lap_s={evaluation.lap_time_s:.9f}")
