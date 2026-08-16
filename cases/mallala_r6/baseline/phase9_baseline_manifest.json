@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "status": "pending_first_executable_reproduction",
+  "historical_reference": {
+    "lap_time_label_s": 69.354897583,
+    "execution_commit": null,
+    "provenance_note": "Recovered external control artifact; the precise lap time is carried by the supplied run label/filename, not by a retained final-run log. Do not treat this value as an executable repository regression until scripts/r6_phase9_baseline_check.py reproduces it."
+  },
+  "software_source_commit": "300fd58fff97a46d8152422cb1d19077af091a44",
+  "artifact_first_committed_in": "67fc56c1508ef1ad7fd267d4ff3ea23a92923a7b",
+  "baseline_package_commit": "f8917f6be7ac06776ccfeab28a7418636958e2bd",
+  "inputs": {
+    "controls": {
+      "path": "cases/mallala_r6/baseline/phase8_reference_controls.csv",
+      "sha256": "2290d07de682fa0ced7701d6cfb6f8459a9e0a96bfd662b0f37c931b8ea5d368",
+      "control_count": 52
+    },
+    "track": {
+      "path": "examples/tracks/mallala_reference.yaml",
+      "sha256": "a213f9f15a3797ddb73f4a2a5969f0a1afa8b7dfccc4c057dd0c1e14e4e67959"
+    },
+    "motorcycle": {
+      "path": "examples/motorcycles/r6_2017plus_reference.yaml",
+      "sha256": "8c3ed9d3ac13b483dd441e6d9b500ada573cd4e5679581c614768117e5f63aee"
+    }
+  },
+  "evaluation": {
+    "control_policy": "reference",
+    "control_policy_max_spacing_m": 100.0,
+    "control_policy_max_arc_heading_change_deg": 45.0,
+    "boundary_margin_m": 0.25,
+    "boundary_check_spacing_m": 0.25,
+    "speed_backend": "python",
+    "output_spacings_m": [1.0, 0.5, 0.25],
+    "executable_lap_times_s": null,
+    "accepted_tolerances": null
+  }
+}
