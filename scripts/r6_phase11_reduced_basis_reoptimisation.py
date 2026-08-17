@@ -2,7 +2,7 @@
 
 This diagnostic removes one selected control from a retained feasible line,
 then re-optimises the remaining lateral offsets with the existing deterministic
-best-improvement pattern search.  Station relocation is deliberately excluded
+best-improvement pattern search. Station relocation is deliberately excluded
 so deletion and relocation effects remain separable.
 """
 
@@ -22,6 +22,7 @@ import numpy as np
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
 from motorcycle_lap_sim.optimisation import (
     REFERENCE_PLANAR_CONTROL_POLICY,
+    PlanarObjectiveEvaluation,
     PlanarOptimisationConfig,
     evaluate_planar_racing_line,
     generate_planar_control_stations,
@@ -120,7 +121,7 @@ def reduced_basis(control_s_m, controls_m, delete_index):
 
 
 def _compact(evaluation):
-    return phase11screen.phase8.PlanarObjectiveEvaluation(
+    return PlanarObjectiveEvaluation(
         evaluation.feasible, evaluation.lap_time_s,
         failure_reason=evaluation.failure_reason)
 
