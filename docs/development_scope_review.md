@@ -4,9 +4,10 @@
 
 This review resolves the development detour that followed the Mallala Phase 9
 work. The Phase 9/10 validation/runtime workflow has now been reproduced on
-current `main`, its decision-relevant validation gaps are recorded, and Phase
-10 is closed for the present development sequence with substantial parameter
-calibration explicitly deferred for identifiability reasons.
+current `main`, its decision-relevant validation gaps are recorded, Phase 10 is
+closed for the present development sequence with substantial parameter
+calibration explicitly deferred for identifiability reasons, and Phase 11 has
+now also been closed with one retained optimisation-assured representative line.
 
 ## Decisions
 
@@ -29,6 +30,14 @@ calibration explicitly deferred for identifiability reasons.
 - Preserve Lap 5 as the first future calibration/development candidate and Lap 4
   as the first untouched hold-out candidate; Laps 1-3 remain additional
   out-of-fit comparisons.
+- Close Phase 11 using the merged representative-line / optimiser-spread
+  diagnostic. Retain `reduced_reoptimised_51` as the representative line for the
+  next bounded task; do not spend further optimisation time seeking small
+  improvements without a new engineering reason.
+- Make Phase 12A rider-facing event extraction and Mallala visual review the
+  next active task.
+- Do not define the simulator-to-run-off export contract until the Phase 12A
+  event positions have been reviewed on the retained representative line.
 
 ## Main-branch review findings
 
@@ -80,16 +89,50 @@ improved track geometry, clarified logger/roll interpretation, additional
 sessions/riders, or a strongly attributable local discrepancy makes a bounded
 parameter subset meaningfully identifiable.
 
-## Re-entry criteria for optimisation work
+## Phase 11 closure decision
 
-The former Phase 9/10 runtime gate is now satisfied: the workflow is
-reproducible and its decision-relevant validation limitations are explicitly
-recorded. Phase 11 optimisation-assurance work may therefore resume, but only
-against a stated engineering need.
+The Phase 11 assurance work proceeded only through bounded experiments tied to
+an engineering question: whether one credible line could be retained for
+rider-facing work despite local optimiser/control-basis sensitivity.
 
-A future optimiser change requires a bounded benchmark against the retained
-method, common-grid ranking, runtime reporting, deterministic reproduction, and
-tests that do more than exercise a new helper function. Existing Phase 11A/B
-results are evidence about search convergence/warm-start dependence, not proof
-of global optimality or permission to extend the superseded home-grown search
-sequence without a new engineering justification.
+The final representative diagnostic re-evaluated four established feasible
+candidates on the same 0.125 m Python common grid with 0.250 m margin and the
+0.8 rad/s finite-roll sensitivity scenario. The eligible geometric medoid was
+`baseline_restart3_52`, but its 0.063809162 s penalty relative to the fastest
+eligible candidate exceeded the explicit 0.050 s representative guardrail.
+The deterministic selection rule therefore retained
+`reduced_reoptimised_51` at 71.396583646 s.
+
+The retained line is a feasible, optimisation-assured local solution suitable
+for the next development task. It is not proof of global optimality. The
+reported optimiser/control-basis spread is numerical sensitivity rather than a
+physical uncertainty or safety corridor.
+
+The complete closure evidence is in
+[`phase11_optimisation_assurance_closure.md`](phase11_optimisation_assurance_closure.md).
+
+## Current re-entry criteria for optimisation work
+
+Phase 11 is closed rather than left open-ended. New optimisation work now
+requires a specific downstream finding that the retained representative is not
+fit for purpose, or another stated engineering need. Any such change requires a
+bounded benchmark against the retained method, common-grid ranking, runtime
+reporting, deterministic reproduction, and meaningful tests.
+
+Warm-start dependence by itself is no longer sufficient reason to add another
+search representation.
+
+## Next bounded task: Phase 12A
+
+Phase 12A extracts deterministic coaching landmarks from the retained
+representative trajectory and presents them on a rider-facing Mallala map. The
+machine-readable event table may include more information than is shown on the
+image, but the image is intentionally stripped of optimisation controls,
+envelopes, corridor diagnostics, and convergence information.
+
+The numerical output and image must be reviewed together before downstream
+interfaces are frozen. In particular, braking, turn-in, apex, positive-drive
+pickup and exit locations should form a plausible T1-T9 sequence and compound
+analytic primitives must not create duplicate rider events.
+
+Only after that review should the simulator-to-run-off contract be designed.
