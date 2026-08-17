@@ -14,7 +14,7 @@ assert spec.loader is not None
 spec.loader.exec_module(phase11)
 
 
-def test_parser_defaults_match_nonlinear_constrained_benchmark():
+def test_parser_defaults_match_linear_constrained_benchmark():
     args = phase11.build_parser().parse_args([
         "reviewed.csv",
         "start_dir",
@@ -25,14 +25,27 @@ def test_parser_defaults_match_nonlinear_constrained_benchmark():
     assert args.max_roll_rate_radps == 0.8
     assert args.max_evaluations == 4000
     assert args.max_iterations == 2000
-    assert args.initial_tr_radius_m == 0.05
-    assert args.final_tr_radius_m == 0.002
+    assert args.initial_trust_region_radius_m == 0.05
+    assert args.final_trust_region_radius_m == 0.002
     assert args.feasibility_tol == 1e-10
     assert args.speed_backend == "numba"
     assert args.common_spacing_m == 0.125
     assert args.boundary_check_spacing_m == 0.125
     assert args.plot_dpi == 400
     assert args.show_control_points is True
+
+
+def test_parser_accepts_legacy_trust_region_flag_aliases():
+    args = phase11.build_parser().parse_args([
+        "reviewed.csv",
+        "start_dir",
+        "output_dir",
+        "--initial-tr-radius-m", "0.1",
+        "--final-tr-radius-m", "0.005",
+    ])
+
+    assert args.initial_trust_region_radius_m == 0.1
+    assert args.final_trust_region_radius_m == 0.005
 
 
 def test_parser_can_hide_development_control_points():
@@ -58,6 +71,13 @@ def test_parser_can_hide_development_control_points():
 )
 def test_production_feasible_constraint_values_match_fail_closed_contract(values, expected):
     assert phase11.production_feasible_constraint_values(values) is expected
+
+
+def test_production_constraint_violation_matches_contract():
+    assert phase11.production_constraint_violation([0.0, 0.0, 1.0]) == 0.0
+    assert phase11.production_constraint_violation([-2e-10, 0.0, 1.0]) == pytest.approx(1e-10)
+    assert phase11.production_constraint_violation([0.0, 0.0, -0.25]) == pytest.approx(0.25)
+    assert np.isinf(phase11.production_constraint_violation([0.0, np.nan, 1.0]))
 
 
 def test_racing_line_artifact_paths_use_stable_margin_filename(tmp_path):
@@ -102,6 +122,48 @@ def test_write_racing_line_csv_includes_path_track_and_margin_coordinates(tmp_pa
     assert float(rows[0]["margin_left_y_m"]) == pytest.approx(3.5)
     assert float(rows[0]["margin_right_y_m"]) == pytest.approx(-3.5)
     assert float(rows[3]["speed_mps"]) == pytest.approx(13.0)
+
+
+def test_fixed_station_linear_geometry_matches_direct_spline_on_canonical_track():
+    track = phase11.Track.from_yaml(phase11.phase9.DEFAULT_TRACK)
+    stations = phase11.generate_planar_control_stations(
+        track,
+        phase11.REFERENCE_PLANAR_CONTROL_POLICY,
+    )
+    geometry = phase11.FixedStationLinearGeometry(track, stations, 5.0)
+
+    controls = 0.35 * np.sin(np.arange(len(stations), dtype=float) * 0.71)
+    direct_projection, direct_forward = geometry.direct_projection_forward(controls)
+    linear_projection, linear_forward = geometry.projection_forward(controls)
+
+    assert np.allclose(linear_projection, direct_projection, rtol=0.0, atol=2e-12)
+    assert np.allclose(linear_forward, direct_forward, rtol=0.0, atol=2e-12)
+
+
+def test_fixed_station_linear_constraint_bounds_match_constraint_values():
+    from scipy.optimize import LinearConstraint
+
+    track = phase11.Track.from_yaml(phase11.phase9.DEFAULT_TRACK)
+    stations = phase11.generate_planar_control_stations(
+        track,
+        phase11.REFERENCE_PLANAR_CONTROL_POLICY,
+    )
+    geometry = phase11.FixedStationLinearGeometry(track, stations, 10.0)
+    controls = 0.2 * np.cos(np.arange(len(stations), dtype=float) * 0.43)
+    margin = 0.25
+
+    projection_constraint, forward_constraint = geometry.scipy_constraints(LinearConstraint, margin)
+    projection, forward = geometry.projection_forward(controls)
+    values = geometry.constraint_values(controls, margin)
+
+    projected = projection_constraint.A @ controls
+    assert np.all(projected >= projection_constraint.lb - 1e-12)
+    assert np.all(projected <= projection_constraint.ub + 1e-12)
+    assert np.allclose(forward_constraint.A @ controls, forward - geometry.base_forward_progress,
+                       rtol=0.0, atol=2e-12)
+    assert values[0] == pytest.approx(np.min(geometry.checked_track.width_left_m - margin - projection))
+    assert values[1] == pytest.approx(np.min(geometry.checked_track.width_right_m - margin + projection))
+    assert values[2] == pytest.approx(np.min(forward))
 
 
 def test_scipy_is_loaded_only_when_requested(monkeypatch):
