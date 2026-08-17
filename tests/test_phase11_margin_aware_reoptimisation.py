@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "r6_phase11_margin_aware_reoptimisation.py"
@@ -43,3 +44,15 @@ def test_backoff_seed_accepts_projected_seed_without_change_when_feasible():
 
     assert scale == 1.0
     np.testing.assert_allclose(candidate, projected)
+
+
+def test_margin_filename_collision_is_rejected():
+    assert phase11.margin_controls_filename(0.2501) == "margin_0.250m_final_controls.csv"
+    assert phase11.margin_controls_filename(0.2502) == "margin_0.250m_final_controls.csv"
+
+    with pytest.raises(ValueError, match="map to the same controls filename"):
+        phase11.require_unique_margin_control_filenames((0.2501, 0.2502))
+
+
+def test_distinct_noncolliding_margin_filenames_are_accepted():
+    phase11.require_unique_margin_control_filenames((0.25, 0.5))
