@@ -101,7 +101,12 @@ The correct classification is **Mallala R6 case calibration/validation**, not ge
 
 The roadmap contains a later assurance phase because a rider-facing or safety-analysis line should not be accepted merely because one local optimiser run produced it. It calls for multiple starts, common-grid ranking, resolution and margin sensitivity, and eventually an independent benchmark method.
 
-Repository Phase 11A-C scripts are **diagnostic assurance experiments**, not a replacement production optimiser and not evidence of global optimality. They were used to demonstrate practical warm-start/search limitations of the current deterministic coordinate-pattern method. They should not be allowed to distract from the primary Phase 9/10 validation work.
+The retained repository Phase 11A-B scripts are **bounded diagnostic assurance
+checks**, not a replacement production optimiser and not evidence of global
+optimality. They demonstrate practical warm-start/search limitations of the
+current deterministic coordinate-pattern method. The Phase 11C latent-search
+experiment was removed after review because it extended optimiser research
+without advancing the primary Phase 9/10 validation work.
 
 ### Later simulation-facing phases
 
@@ -125,7 +130,7 @@ As of the status date, the repository includes substantially more than the origi
 - fixed-line finite-roll sensitivity and roll-aware racing-line re-optimisation scripts;
 - sector/spatial diagnostics for comparing ideal, finite-roll, and measured behaviour;
 - trajectory export with speed, accelerations, lean, roll demand/ceiling, limits, gear and RPM;
-- optimisation-assurance diagnostics using multiple starts and alternative warm-start/search representations; and
+- bounded optimisation-assurance diagnostics using multiple starts and hierarchical warm starts; and
 - an optional Numba fixed-path backend while retaining the Python solver as the authoritative reference.
 
 Detailed numerical baseline provenance is in [`phase9_baseline_freeze.md`](phase9_baseline_freeze.md). Telemetry source-quality findings are in [`mallala_r6_telemetry_integrity.md`](mallala_r6_telemetry_integrity.md). The implemented architecture is summarised in [`system_spec.md`](system_spec.md).

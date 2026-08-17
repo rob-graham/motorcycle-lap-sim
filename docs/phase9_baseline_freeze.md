@@ -36,7 +36,7 @@ The recovered final reference control artifact is retained as:
 
 Its SHA-256 is:
 
-`2290d07de682fa0ced7701d6cfb6f8459a9e0a96bfd662b0f37c931b8ea5d368`
+`5727dd1326c7892682f1d7dc1b78a67cede5c7b1c769577a6d26ae9ad564bf83`
 
 The historical external run identified this artifact as **69.354897583 s**. The CSV body itself contains stations, controls and bounds, not the historical final-run log. On 16 August 2026 the repository fixed-geometry reproduction command independently evaluated the same committed artifact and reproduced **69.354897583 s exactly at 1.00 m output spacing**. The historical label is therefore now also the executable repository regression value, while the historical execution commit and unrecovered convergence/evaluation metadata remain unknown.
 
@@ -54,9 +54,9 @@ With the canonical committed inputs and Python speed backend, the fixed saved ge
 
 The canonical input identities are:
 
-- controls SHA-256: `2290d07de682fa0ced7701d6cfb6f8459a9e0a96bfd662b0f37c931b8ea5d368`;
-- track SHA-256: `f419ee6e6e48f92b1d884223052f2db4411e6ea2a75c7e9a1e9e1c10f04cb787`;
-- motorcycle SHA-256: `1cd7d74a272b2dd8b42339fd0e85e46f3dc67485696aba772e901bdc27922832`.
+- controls SHA-256: `5727dd1326c7892682f1d7dc1b78a67cede5c7b1c769577a6d26ae9ad564bf83`;
+- track SHA-256: `a213f9f15a3797ddb73f4a2a5969f0a1afa8b7dfccc4c057dd0c1e14e4e67959`;
+- motorcycle SHA-256: `8c3ed9d3ac13b483dd441e6d9b500ada573cd4e5679581c614768117e5f63aee`.
 
 The executable check fails closed if those canonical hashes change or if lap time, path length, clearance, projected offsets or curvature extrema exceed the explicit tolerances recorded in the manifest/script. These tolerances are numerical-regression tolerances, not estimates of physical model uncertainty.
 

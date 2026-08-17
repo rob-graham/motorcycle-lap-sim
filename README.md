@@ -2,12 +2,13 @@
 
 A clean-sheet Python project for minimum-lap-time motorcycle simulation, racing-line optimisation, and Mallala R6 validation development.
 
-The repository has progressed beyond the original Phase 8 documentation. It now contains the frozen Mallala baseline, telemetry ingestion/registration/comparison tools, a simple switchable finite-roll sensitivity model, roll-aware re-optimisation diagnostics, and later optimisation-assurance experiments.
+The repository has progressed beyond the original Phase 8 documentation. It now contains the frozen Mallala baseline, telemetry ingestion/registration/comparison tools, a simple switchable finite-roll sensitivity model, roll-aware re-optimisation diagnostics, and bounded optimisation-assurance checks.
 
 For review, start with:
 
 - [simulation project context and source hierarchy](docs/project_context.md);
 - [system specification and implemented phase status](docs/system_spec.md);
+- [development scope and stale-branch decisions](docs/development_scope_review.md);
 - [Phase 9 Mallala numerical baseline freeze](docs/phase9_baseline_freeze.md); and
 - [Mallala R6 telemetry integrity assessment](docs/mallala_r6_telemetry_integrity.md).
 
@@ -141,7 +142,12 @@ Any calibration work should therefore use a small bounded identifiable subset, r
 
 ## Optimisation-assurance diagnostics
 
-The repository also contains later `r6_phase11a_*`, `r6_phase11b_*`, and `r6_phase11c_*` scripts. These are diagnostic experiments assessing warm-start and basin/convergence limitations of the existing deterministic pattern search. They are not a production replacement optimiser and do not prove global optimality.
+The repository retains the bounded `r6_phase11a_*` multistart and
+`r6_phase11b_*` hierarchy diagnostics. They assess warm-start and convergence
+limitations of the existing deterministic pattern search; they are not a
+production replacement optimiser and do not prove global optimality. The later
+Phase 11C latent-search experiment was removed because it expanded optimiser
+research without advancing the current Phase 9/10 validation workflow.
 
 Their main review value is to show that generic-start spread can arise from limited search convergence. It should not be mislabelled as physical uncertainty, and progressively larger brute-force search budgets are not the primary Mallala validation objective.
 
