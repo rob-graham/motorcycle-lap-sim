@@ -24,6 +24,7 @@ def test_parser_defaults():
     assert args.max_roll_rate_radps == 0.8
     assert args.common_spacing_m == 0.125
     assert args.boundary_check_spacing_m == 0.125
+    assert args.representative_max_lap_delta_s == 0.05
     assert args.plot_dpi == 400
 
 
@@ -56,29 +57,66 @@ def test_pairwise_geometry_is_symmetric_and_uses_euclidean_displacement():
     np.testing.assert_allclose(rms, maximum)
 
 
-def test_select_geometric_medoid_selects_existing_central_candidate():
+def test_representative_selection_excludes_ineligible_central_perturbation():
+    labels = ["left", "perturbation", "right"]
+    rms = np.array([
+        [0.0, 1.0, 2.0],
+        [1.0, 0.0, 1.0],
+        [2.0, 1.0, 0.0],
+    ])
+    lap_times = {"left": 71.40, "perturbation": 71.41, "right": 71.42}
+    eligible = {"left": True, "perturbation": False, "right": True}
+
+    representative, medoid, fastest, means, delta, reason = module.select_representative_candidate(
+        labels, rms, lap_times, eligible, 0.05)
+
+    assert representative == "left"
+    assert medoid == "left"
+    assert fastest == "left"
+    assert np.isnan(means["perturbation"])
+    assert delta == pytest.approx(0.0)
+    assert reason == "eligible_geometric_medoid_within_lap_delta"
+
+
+def test_representative_selection_allows_eligible_medoid_with_small_lap_penalty():
     labels = ["a", "b", "c"]
     rms = np.array([
         [0.0, 1.0, 2.0],
         [1.0, 0.0, 1.0],
         [2.0, 1.0, 0.0],
     ])
-    lap_times = {"a": 71.4, "b": 71.5, "c": 71.3}
+    lap_times = {"a": 71.40, "b": 71.43, "c": 71.45}
+    eligible = {label: True for label in labels}
 
-    label, means = module.select_geometric_medoid(labels, rms, lap_times)
+    representative, medoid, fastest, means, delta, reason = module.select_representative_candidate(
+        labels, rms, lap_times, eligible, 0.05)
 
-    assert label == "b"
-    np.testing.assert_allclose(means, [1.5, 1.0, 1.5])
+    assert representative == "b"
+    assert medoid == "b"
+    assert fastest == "a"
+    assert means["b"] == pytest.approx(1.0)
+    assert delta == pytest.approx(0.03)
+    assert reason == "eligible_geometric_medoid_within_lap_delta"
 
 
-def test_select_geometric_medoid_uses_lap_time_only_as_tie_break():
-    labels = ["a", "b"]
-    rms = np.array([[0.0, 1.0], [1.0, 0.0]])
-    lap_times = {"a": 71.5, "b": 71.4}
+def test_representative_selection_falls_back_when_medoid_too_slow():
+    labels = ["a", "b", "c"]
+    rms = np.array([
+        [0.0, 1.0, 2.0],
+        [1.0, 0.0, 1.0],
+        [2.0, 1.0, 0.0],
+    ])
+    lap_times = {"a": 71.40, "b": 71.48, "c": 71.50}
+    eligible = {label: True for label in labels}
 
-    label, _ = module.select_geometric_medoid(labels, rms, lap_times)
+    representative, medoid, fastest, _, delta, reason = module.select_representative_candidate(
+        labels, rms, lap_times, eligible, 0.05)
 
-    assert label == "b"
+    assert medoid == "b"
+    assert fastest == "a"
+    assert representative == "a"
+    assert delta == pytest.approx(0.08)
+    assert reason == "fastest_eligible_fallback_medoid_exceeds_lap_delta"
 
 
 def test_spread_envelope_rejects_mismatched_arrays():
