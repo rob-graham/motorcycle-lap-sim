@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import sys
 
 import numpy as np
 import pytest
@@ -8,6 +9,7 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "r6_phase11_robust_line_envelope.py"
 spec = importlib.util.spec_from_file_location("phase11_robust_line_envelope_test", SCRIPT)
 module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
