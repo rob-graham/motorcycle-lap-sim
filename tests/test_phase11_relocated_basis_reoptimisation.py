@@ -70,3 +70,40 @@ def test_guide_point_uses_singular_stored_offset_field(monkeypatch):
     point = module._guide_point(object(), smooth_line, 1, 40.0)
 
     assert point == (10.0, 18.0)
+
+
+def test_racing_line_plot_uses_singular_stored_offset_field(tmp_path):
+    track = module.Track.from_yaml("examples/tracks/test_oval.yaml")
+    checked_s = np.array([0.0, 20.0, 40.0])
+    checked_track = module.sample_track_stations(track, checked_s)
+
+    spline = SimpleNamespace(evaluate=lambda stations: (
+        module.sample_track_stations(track, stations).x_m,
+        module.sample_track_stations(track, stations).y_m,
+        np.ones(len(stations)),
+        np.zeros(len(stations)),
+    ))
+    smooth_line = SimpleNamespace(
+        evaluated_track_s_m=checked_s,
+        spline=spline,
+        guide_offset_m=np.array([0.0]),
+        guide_x_m=np.array([checked_track.x_m[0]]),
+        guide_y_m=np.array([checked_track.y_m[0]]),
+    )
+    evaluation = SimpleNamespace(smooth_line=smooth_line)
+    output = tmp_path / "line.png"
+
+    module._write_racing_line_png(
+        output,
+        track,
+        evaluation,
+        evaluation,
+        0,
+        0.0,
+        1.0,
+        margin_m=0.25,
+        dpi=50,
+    )
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
