@@ -134,7 +134,13 @@ The correct claim is **Mallala R6 case calibration/validation** where supported,
 
 ## Optimisation-assurance diagnostics after the Phase 9/10 work
 
-The repository contains `r6_phase11a_*`, `r6_phase11b_*`, and `r6_phase11c_*` diagnostic scripts. They document practical search/warm-start limitations of the current deterministic planar optimiser. They are assurance experiments rather than core physics and do not establish a globally optimal racing line.
+The repository retains the bounded `r6_phase11a_*` multistart and
+`r6_phase11b_*` hierarchy diagnostics. They document practical
+search/warm-start limitations of the current deterministic planar optimiser.
+They are assurance checks rather than core physics and do not establish a
+globally optimal racing line. The Phase 11C latent-search experiment was
+removed after review because it expanded optimiser research without resolving
+the current Phase 9/10 validation work.
 
 The current engineering interpretation is that poor generic-start results primarily demonstrate search convergence/basin dependence, not physical-model uncertainty. These diagnostics should remain subordinate to the primary Mallala validation objective; larger brute-force budgets or progressively more elaborate home-grown search variants are not justified merely because the local optimiser is warm-start dependent.
 
