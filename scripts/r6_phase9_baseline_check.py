@@ -78,6 +78,12 @@ def canonical_text_sha256(path):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# Backward-compatible name used by sibling diagnostics that predate the
+# cross-platform canonical-text identity change. It deliberately retains the
+# canonical-text semantics; it is not a raw working-tree byte hash.
+sha256_file = canonical_text_sha256
+
+
 def load_frozen_controls(path, stations, lower_bounds, upper_bounds):
     required = ("index", "control_s_m", "best_offset_m", "lower_bound_m", "upper_bound_m")
     with Path(path).open(newline="", encoding="utf-8") as stream:
