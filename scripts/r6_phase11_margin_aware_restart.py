@@ -65,7 +65,7 @@ def _positive_int(text):
 
 
 def margin_controls_filename(margin_m):
-    return f"margin_{float(margin_m):.3f}m_final_controls.csv"
+    return phase11.margin_controls_filename(margin_m)
 
 
 def build_parser():
@@ -92,6 +92,7 @@ def main(argv=None):
     margins = tuple(sorted(set(float(value) for value in args.margins_m)))
     if not margins:
         raise ValueError("at least one margin is required")
+    phase11.require_unique_margin_control_filenames(margins)
 
     track = Track.from_yaml(phase9.DEFAULT_TRACK)
     base_bike = load_motorcycle_config(phase9.DEFAULT_MOTORCYCLE)
