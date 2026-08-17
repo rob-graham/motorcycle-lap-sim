@@ -209,19 +209,19 @@ def roll_rate_speed_limit_numba(curvature_1pm, curvature_gradient_1pm2,
     if (not np.all(np.isfinite(curvature)) or not np.all(np.isfinite(gradient))
             or not np.all(np.isfinite(cap)) or np.any(cap < 0)):
         raise ValueError("roll-rate speed-limit inputs must be finite with non-negative speed caps")
-    limit = _roll_rate_speed_limits(
-        curvature, gradient, cap, float(max_roll_rate_radps), float(gravity_mps2),
-        bisection_iterations)
+
+    original_shape = curvature.shape
+    flat_curvature = np.ascontiguousarray(curvature.ravel())
+    flat_gradient = np.ascontiguousarray(gradient.ravel())
+    flat_cap = np.ascontiguousarray(cap.ravel())
+    flat_limit = _roll_rate_speed_limits(
+        flat_curvature, flat_gradient, flat_cap, float(max_roll_rate_radps),
+        float(gravity_mps2), bisection_iterations)
+    limit = flat_limit.reshape(original_shape)
     if np.any(np.isnan(limit)) or np.any(limit <= 0):
         raise ValueError("roll-rate speed limits must be positive or infinity")
     limit.setflags(write=False)
     return limit
-
-
-# Compatibility hook used by the merged Phase 11 runtime profiler. Within this
-# optional backend the unqualified name intentionally denotes the accelerated
-# implementation; the authoritative Python function remains in motorcycle.roll.
-roll_rate_speed_limit_mps = roll_rate_speed_limit_numba
 
 
 @njit(cache=True, fastmath=False)
