@@ -97,6 +97,11 @@ def timing_summary(samples):
     }
 
 
+def sampled_path_count(sampled_path):
+    """Return the number of fixed-path samples using the SampledPath public coordinate."""
+    return len(sampled_path.q_m)
+
+
 def _print_timing(label, samples):
     summary = timing_summary(samples)
     print(f"{label}_minimum_s={summary['minimum_s']:.9f}")
@@ -148,7 +153,7 @@ def main(argv=None):
     print(f"max_roll_rate_radps={args.max_roll_rate_radps:.9f}")
     print(f"repeats={args.repeats}")
     print(f"speed_backend={args.speed_backend}")
-    print(f"sample_count={len(smooth.sampled_path.s_m)}")
+    print(f"sample_count={sampled_path_count(smooth.sampled_path)}")
     print(f"boundary_check_count={len(smooth.evaluated_track_s_m)}")
     print(f"path_length_m={smooth.sampled_path.total_length_m:.9f}")
     print(f"minimum_boundary_clearance_m={smooth.minimum_boundary_clearance_m:.9f}")
