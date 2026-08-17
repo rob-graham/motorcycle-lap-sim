@@ -142,7 +142,7 @@ def _roll_limit(path, bike, gradient, pre_roll_cap, numba_backend):
     return (
         np.full(len(path.q_m), np.inf)
         if handling is None or handling.max_roll_rate_radps is None
-        else numba_backend.roll_rate_speed_limit_mps(
+        else numba_backend.roll_rate_speed_limit_numba(
             path.curvature_1pm,
             gradient,
             pre_roll_cap,
