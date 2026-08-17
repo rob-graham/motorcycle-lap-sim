@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("numba")
 
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
+from motorcycle_lap_sim.motorcycle.roll import roll_rate_speed_limit_mps
 from motorcycle_lap_sim.path import SampledPath, from_sampled_track
 from motorcycle_lap_sim.optimisation import (
     REFERENCE_PLANAR_CONTROL_POLICY, generate_planar_control_stations,
@@ -19,7 +20,7 @@ from motorcycle_lap_sim.speed_solver import (
 )
 from motorcycle_lap_sim.speed_solver.numba_backend import (
     braking_deceleration_numba, forward_acceleration_numba,
-    solve_speed_profile_numba,
+    roll_rate_speed_limit_numba, solve_speed_profile_numba,
 )
 from motorcycle_lap_sim.track import Track, sample_track
 
@@ -40,6 +41,32 @@ def test_scalar_capabilities_match_reference(filename):
             assert braking_deceleration_numba(speed, curvature, bike) == pytest.approx(
                 braking_capability(speed, curvature, bike).deceleration_mps2,
                 rel=0, abs=2e-13)
+
+
+def test_roll_limit_kernel_matches_reference():
+    curvature = np.array([0.0, 0.005, -0.012, 0.03, -0.08, 0.015])
+    gradient = np.array([0.0, 0.0002, -0.0015, 0.004, -0.009, 0.001])
+    cap = np.array([70.0, 68.0, 54.0, 44.0, 30.0, 0.0])
+    expected = roll_rate_speed_limit_mps(
+        curvature, gradient, cap, 0.8, gravity_mps2=9.80665)
+    actual = roll_rate_speed_limit_numba(
+        curvature, gradient, cap, 0.8, gravity_mps2=9.80665)
+    assert np.array_equal(np.isinf(actual), np.isinf(expected))
+    finite = np.isfinite(expected)
+    assert np.allclose(actual[finite], expected[finite], rtol=0, atol=1e-12)
+    assert not actual.flags.writeable
+
+
+def test_roll_limit_kernel_validation_matches_reference_contract():
+    with pytest.raises(ValueError, match="identical shapes"):
+        roll_rate_speed_limit_numba([0.0], [0.0, 0.1], [10.0], 0.8)
+    with pytest.raises(ValueError, match="finite and positive"):
+        roll_rate_speed_limit_numba([0.0], [0.0], [10.0], 0.0)
+    with pytest.raises(ValueError, match="non-negative speed caps"):
+        roll_rate_speed_limit_numba([0.0], [0.0], [-1.0], 0.8)
+    with pytest.raises(ValueError, match="positive integer"):
+        roll_rate_speed_limit_numba([0.0], [0.0], [10.0], 0.8,
+                                    bisection_iterations=0)
 
 
 def _corner_path():
