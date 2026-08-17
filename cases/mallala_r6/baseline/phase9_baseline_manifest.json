@@ -11,6 +11,7 @@
   "artifact_first_committed_in": "67fc56c1508ef1ad7fd267d4ff3ea23a92923a7b",
   "baseline_package_commit": "04bcf77829704b2de11a1b0a7f3dea45e3c9a08f",
   "historical_execution_commit": null,
+  "input_identity_hash_method": "sha256_utf8_text_normalized_to_lf",
   "inputs": {
     "controls": {
       "path": "cases/mallala_r6/baseline/phase8_reference_controls.csv",

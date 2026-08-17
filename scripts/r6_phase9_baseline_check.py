@@ -4,6 +4,10 @@ The command loads the recovered 52-control artifact without optimisation,
 validates its identity/stations/bounds, evaluates the fixed geometry at the
 frozen output spacings, and fails closed if the canonical baseline no longer
 matches the executable regression values established on 16 August 2026.
+
+Baseline text identities are SHA-256 hashes of UTF-8 content after newline
+normalisation to LF. This makes the identity check independent of Git working-
+tree CRLF conversion while remaining sensitive to every other text change.
 """
 
 import argparse
@@ -45,7 +49,7 @@ EXPECTED_CURVATURE_MIN_1PM = (-0.101362936, -0.101793650, -0.101472758)
 EXPECTED_CURVATURE_MAX_1PM = (0.027468564, 0.027609254, 0.027597204)
 
 # Tight numerical-regression tolerances. Hash checks separately require exact
-# identity of the controls, track and motorcycle inputs.
+# canonical text identity of the controls, track and motorcycle inputs.
 LAP_TIME_ATOL_S = 1e-6
 PATH_LENGTH_ATOL_M = 1e-6
 CLEARANCE_ATOL_M = 1e-7
@@ -62,12 +66,16 @@ def build_parser():
     return parser
 
 
-def sha256_file(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def canonical_text_sha256(path):
+    """Hash UTF-8 text after normalising CRLF and CR newlines to LF.
+
+    Git may materialise committed LF text as CRLF in a Windows working tree
+    when ``core.autocrlf=true``. Baseline identity is therefore defined over
+    canonical text rather than platform-specific working-tree bytes.
+    """
+    text = Path(path).read_bytes().decode("utf-8")
+    canonical = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def load_frozen_controls(path, stations, lower_bounds, upper_bounds):
@@ -155,7 +163,8 @@ def verify_default_regression(controls_hash, track_hash, motorcycle_hash, evalua
     for label, actual, expected in identities:
         if actual != expected:
             raise RuntimeError(
-                f"Phase 9 baseline regression: {label} SHA-256 {actual} does not match {expected}")
+                f"Phase 9 baseline regression: {label} canonical text SHA-256 "
+                f"{actual} does not match {expected}")
 
     if len(evaluations) != len(OUTPUT_SPACINGS_M):
         raise RuntimeError("Phase 9 baseline regression: output-spacing evaluation count changed")
@@ -186,15 +195,16 @@ def verify_default_regression(controls_hash, track_hash, motorcycle_hash, evalua
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    controls_hash = sha256_file(args.controls)
-    track_hash = sha256_file(args.track)
-    motorcycle_hash = sha256_file(args.motorcycle)
+    controls_hash = canonical_text_sha256(args.controls)
+    track_hash = canonical_text_sha256(args.track)
+    motorcycle_hash = canonical_text_sha256(args.motorcycle)
 
     track, stations, controls, evaluations = evaluate_baseline(
         args.controls, args.track, args.motorcycle, speed_backend=args.speed_backend)
 
     print(f"python_version={platform.python_version()}")
     print(f"numpy_version={np.__version__}")
+    print("input_identity_hash_method=sha256_utf8_text_normalized_to_lf")
     print(f"controls_path={args.controls}")
     print(f"controls_sha256={controls_hash}")
     print(f"track_path={args.track}")
