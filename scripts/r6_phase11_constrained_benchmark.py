@@ -6,10 +6,11 @@ representation, and ranks the best production-feasible line on the same
 authoritative Python common grid.
 
 For fixed control stations, dense corridor projection and forward progress are
-affine functions of the lateral control offsets.  This script therefore
-precomputes those exact spline response matrices once and supplies them to
-COBYQA as dense LinearConstraint objects.  Final candidates must still pass the
-existing production fail-closed geometry checks.
+affine functions of the lateral control offsets. This script precomputes those
+affine response matrices once, but exposes only the three production geometry
+reductions to COBYQA: minimum left clearance, minimum right clearance, and
+minimum forward progress. The scalar reductions are cached by control vector.
+No derivative information is supplied to COBYQA.
 
 Routine outputs include saved controls plus a sampled racing-line CSV and a
 high-resolution thin-line PNG for each margin. Control-point markers are shown
@@ -123,12 +124,12 @@ def build_parser():
 
 def _load_scipy_tools():
     try:
-        from scipy.optimize import LinearConstraint, minimize
+        from scipy.optimize import NonlinearConstraint, minimize
     except (ImportError, ModuleNotFoundError) as error:
         raise RuntimeError(
             "SciPy is required only for this benchmark; install the benchmark extra "
             "with 'python -m pip install -e \".[test,accelerated,benchmark]\"'") from error
-    return minimize, LinearConstraint
+    return minimize, NonlinearConstraint
 
 
 def _speed_solver(speed_backend):
@@ -191,8 +192,8 @@ def production_constraint_violation(values):
     ))
 
 
-class FixedStationLinearGeometry:
-    """Exact dense affine geometry model for fixed lateral-control stations."""
+class FixedStationAffineGeometry:
+    """Exact dense affine geometry response for fixed lateral-control stations."""
 
     def __init__(self, track, stations, boundary_check_spacing_m):
         self.track = track
@@ -228,8 +229,8 @@ class FixedStationLinearGeometry:
         return len(self.check_s_m)
 
     @property
-    def linear_constraint_rows(self):
-        return 2 * self.check_count
+    def response_matrix_bytes(self):
+        return int(self.projection_response.nbytes + self.forward_response.nbytes)
 
     def _spline(self, controls):
         controls = np.asarray(controls, dtype=float)
@@ -254,12 +255,10 @@ class FixedStationLinearGeometry:
         return np.asarray(projection, dtype=float), np.asarray(forward, dtype=float)
 
     def direct_projection_forward(self, controls):
-        """Evaluate dense spline geometry directly for equivalence tests/diagnostics."""
         projection, forward = self._direct_projection_forward(controls)
         return projection.copy(), forward.copy()
 
     def projection_forward(self, controls):
-        """Evaluate the precomputed affine model for one control vector."""
         controls = np.asarray(controls, dtype=float)
         if controls.shape != self.stations.shape or not np.all(np.isfinite(controls)):
             raise ValueError("candidate controls must be finite and match control stations")
@@ -268,7 +267,6 @@ class FixedStationLinearGeometry:
         return projection, forward
 
     def constraint_values(self, controls, margin_m):
-        """Return minimum left clearance, right clearance and forward progress."""
         projection, forward = self.projection_forward(controls)
         left = self.checked_track.width_left_m - margin_m - projection
         right = self.checked_track.width_right_m - margin_m + projection
@@ -278,34 +276,49 @@ class FixedStationLinearGeometry:
             float(np.min(forward)),
         ])
 
-    def scipy_constraints(self, LinearConstraint, margin_m):
-        """Return exact dense linear corridor and forward-progress constraints."""
-        projection_lower = (
-            -(self.checked_track.width_right_m - margin_m)
-            - PRODUCTION_BOUNDARY_TOL_M
-            - self.base_projection_m
-        )
-        projection_upper = (
-            self.checked_track.width_left_m
-            - margin_m
-            + PRODUCTION_BOUNDARY_TOL_M
-            - self.base_projection_m
-        )
-        forward_lower = -self.base_forward_progress
-        forward_upper = np.full(self.check_count, np.inf)
-        return (
-            LinearConstraint(self.projection_response, projection_lower, projection_upper),
-            LinearConstraint(self.forward_response, forward_lower, forward_upper),
-        )
+
+class ScalarGeometryConstraints:
+    """Three cached scalar reductions supplied to the derivative-free solver."""
+
+    def __init__(self, affine_geometry, margin_m):
+        self.affine_geometry = affine_geometry
+        self.margin_m = float(margin_m)
+        self.calls = 0
+        self.unique_evaluations = 0
+        self.cache_hits = 0
+        self._cached_controls = None
+        self._cached_values = None
+
+    def __call__(self, controls):
+        self.calls += 1
+        candidate = np.asarray(controls, dtype=float)
+        if (
+            self._cached_controls is not None
+            and np.array_equal(candidate, self._cached_controls)
+        ):
+            self.cache_hits += 1
+            return self._cached_values.copy()
+        values = self.affine_geometry.constraint_values(candidate, self.margin_m)
+        self.unique_evaluations += 1
+        self._cached_controls = candidate.copy()
+        self._cached_values = values.copy()
+        return values
 
 
 class ConstrainedObjective:
     """Evaluate lap time and retain the best production-feasible candidate."""
 
-    def __init__(self, linear_geometry, bike, margin_m, optimisation_sample_spacing_m, speed_backend):
-        self.linear_geometry = linear_geometry
+    def __init__(
+        self,
+        affine_geometry,
+        scalar_constraints,
+        bike,
+        optimisation_sample_spacing_m,
+        speed_backend,
+    ):
+        self.affine_geometry = affine_geometry
+        self.scalar_constraints = scalar_constraints
         self.bike = bike
-        self.margin_m = float(margin_m)
         self.optimisation_sample_spacing_m = float(optimisation_sample_spacing_m)
         self.solver = _speed_solver(speed_backend)
         self.evaluations = 0
@@ -317,7 +330,7 @@ class ConstrainedObjective:
     def __call__(self, controls):
         self.evaluations += 1
         try:
-            spline = self.linear_geometry._spline(controls)
+            spline = self.affine_geometry._spline(controls)
             path = spline.sampled_path(self.optimisation_sample_spacing_m)
             speed = self.solver(path, self.bike)
             lap = float(speed.lap_time_s)
@@ -326,7 +339,7 @@ class ConstrainedObjective:
             return INVALID_OBJECTIVE_S
 
         if lap < self.best_lap_time_s:
-            values = self.linear_geometry.constraint_values(controls, self.margin_m)
+            values = self.scalar_constraints(controls)
             if production_feasible_constraint_values(values):
                 self.best_lap_time_s = lap
                 self.best_controls = np.asarray(controls, dtype=float).copy()
@@ -467,6 +480,9 @@ def _write_summary(path, rows):
         "minimum_track_edge_clearance_m",
         "objective_evaluations",
         "invalid_objective_evaluations",
+        "constraint_calls",
+        "constraint_unique_evaluations",
+        "constraint_cache_hits",
         "nit",
         "success",
         "status",
@@ -475,7 +491,8 @@ def _write_summary(path, rows):
         "terminal_left_clearance_m",
         "terminal_right_clearance_m",
         "terminal_minimum_forward_progress",
-        "linear_constraint_rows",
+        "checker_station_count",
+        "response_matrix_bytes",
         "constraint_model_build_elapsed_s",
         "elapsed_s",
         "maximum_abs_control_delta_from_start_m",
@@ -495,7 +512,7 @@ def main(argv=None):
     if args.final_trust_region_radius_m >= args.initial_trust_region_radius_m:
         raise ValueError("final trust-region radius must be smaller than initial trust-region radius")
     phase9f._require_canonical_inputs()
-    minimize, LinearConstraint = _load_scipy_tools()
+    minimize, NonlinearConstraint = _load_scipy_tools()
 
     margins = tuple(sorted(set(float(value) for value in args.margins_m)))
     if not margins:
@@ -510,7 +527,7 @@ def main(argv=None):
     stations = generate_planar_control_stations(track, REFERENCE_PLANAR_CONTROL_POLICY)
 
     model_started = time.perf_counter()
-    linear_geometry = FixedStationLinearGeometry(
+    affine_geometry = FixedStationAffineGeometry(
         track,
         stations,
         args.boundary_check_spacing_m,
@@ -544,8 +561,10 @@ def main(argv=None):
     print("scenario_note=finite roll rate is a sensitivity scenario, not a calibrated R6/rider constant")
     print("benchmark_method=scipy.optimize.minimize(method='COBYQA')")
     print("benchmark_note=fixed-station derivative-free diagnostic; not a production optimiser replacement")
-    print("constraint_model=exact precomputed dense LinearConstraint geometry for fixed stations")
-    print(f"linear_constraint_rows={linear_geometry.linear_constraint_rows}")
+    print("constraint_model=three cached scalar minima from exact precomputed affine dense geometry")
+    print("constraint_derivatives=none; COBYQA remains derivative-free")
+    print(f"checker_station_count={affine_geometry.check_count}")
+    print(f"response_matrix_bytes={affine_geometry.response_matrix_bytes}")
     print(f"constraint_model_build_elapsed_s={constraint_model_build_elapsed_s:.6f}")
     print("optimisation_sample_spacing_m=1.000000")
     print(f"common_ranking_spacing_m={args.common_spacing_m:.6f}")
@@ -579,21 +598,26 @@ def main(argv=None):
             f"margin {margin:.3f} m benchmark start on common grid",
         )
 
-        starting_constraints = linear_geometry.constraint_values(start, margin)
+        scalar_constraints = ScalarGeometryConstraints(affine_geometry, margin)
+        starting_constraints = scalar_constraints(start)
         if not production_feasible_constraint_values(starting_constraints):
             raise RuntimeError(
-                f"margin {margin:.3f} m benchmark start violates linear geometry model: "
+                f"margin {margin:.3f} m benchmark start violates scalar geometry model: "
                 f"{starting_constraints.tolist()}")
 
         objective = ConstrainedObjective(
-            linear_geometry,
+            affine_geometry,
+            scalar_constraints,
             bike,
-            margin,
             1.0,
             args.speed_backend,
         )
         objective(start)
-        constraints = linear_geometry.scipy_constraints(LinearConstraint, margin)
+        nonlinear_constraint = NonlinearConstraint(
+            scalar_constraints,
+            lb=np.array([-PRODUCTION_BOUNDARY_TOL_M, -PRODUCTION_BOUNDARY_TOL_M, 0.0]),
+            ub=np.full(3, np.inf),
+        )
 
         started = time.perf_counter()
         result = minimize(
@@ -601,7 +625,7 @@ def main(argv=None):
             start,
             method="COBYQA",
             bounds=list(zip(lower, upper)),
-            constraints=constraints,
+            constraints=(nonlinear_constraint,),
             options={
                 "maxfev": args.max_evaluations,
                 "maxiter": args.max_iterations,
@@ -644,7 +668,7 @@ def main(argv=None):
             show_control_points=args.show_control_points,
         )
 
-        terminal_constraints = linear_geometry.constraint_values(np.asarray(result.x, dtype=float), margin)
+        terminal_constraints = scalar_constraints(np.asarray(result.x, dtype=float))
         max_constraint_violation = production_constraint_violation(terminal_constraints)
         delta = np.asarray(best_controls) - start
         usable_clearance = float(final_common.smooth_line.minimum_boundary_clearance_m)
@@ -659,6 +683,9 @@ def main(argv=None):
             "minimum_track_edge_clearance_m": usable_clearance + margin,
             "objective_evaluations": int(objective.evaluations),
             "invalid_objective_evaluations": int(objective.invalid_evaluations),
+            "constraint_calls": int(scalar_constraints.calls),
+            "constraint_unique_evaluations": int(scalar_constraints.unique_evaluations),
+            "constraint_cache_hits": int(scalar_constraints.cache_hits),
             "nit": int(getattr(result, "nit", -1)),
             "success": bool(result.success),
             "status": int(result.status),
@@ -667,7 +694,8 @@ def main(argv=None):
             "terminal_left_clearance_m": float(terminal_constraints[0]),
             "terminal_right_clearance_m": float(terminal_constraints[1]),
             "terminal_minimum_forward_progress": float(terminal_constraints[2]),
-            "linear_constraint_rows": int(linear_geometry.linear_constraint_rows),
+            "checker_station_count": int(affine_geometry.check_count),
+            "response_matrix_bytes": int(affine_geometry.response_matrix_bytes),
             "constraint_model_build_elapsed_s": float(constraint_model_build_elapsed_s),
             "elapsed_s": float(elapsed),
             "maximum_abs_control_delta_from_start_m": float(np.max(np.abs(delta))),
@@ -686,6 +714,9 @@ def main(argv=None):
             f"minimum_track_edge_clearance_m={row['minimum_track_edge_clearance_m']:.9f} "
             f"objective_evaluations={objective.evaluations} "
             f"invalid_objective_evaluations={objective.invalid_evaluations} "
+            f"constraint_calls={scalar_constraints.calls} "
+            f"constraint_unique_evaluations={scalar_constraints.unique_evaluations} "
+            f"constraint_cache_hits={scalar_constraints.cache_hits} "
             f"nit={row['nit']} success={row['success']} status={row['status']} "
             f"max_constraint_violation={max_constraint_violation:.12g} "
             f"terminal_left_clearance_m={terminal_constraints[0]:.12g} "
