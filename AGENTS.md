@@ -1,5 +1,7 @@
 # Repository instructions
 
+## Engineering invariants
+
 - This is a clean-sheet implementation.
 - Do not import old lap-time simulator source code unless explicitly requested.
 - Build and validate fixed-path simulation before racing-line optimisation.
@@ -9,7 +11,42 @@
 - Plotting must be separate from numerical calculations.
 - Every new physical or geometric feature requires tests.
 - Preserve analytically understandable test cases.
-- Never suppress numerical or optimisation warnings merely to make tests pass.
+- Never suppress numerical, optimisation, data-quality, or provenance warnings merely to make tests pass.
 - Record assumptions explicitly.
 - Prefer deterministic calculations.
 - Maintain backward-compatible data formats only when deliberately specified.
+
+## Project context and scope
+
+- Before non-trivial work, read `docs/project_context.md`, `docs/system_spec.md`, and `docs/development_scope_review.md`, plus the most relevant phase/method document for the task.
+- Repository code, tests, configuration, cases, and current repository documentation define implemented behaviour. External roadmap documents define intended direction, not implemented capability.
+- Do not infer roadmap phase status from historical script names alone. Some repository `phase10` scripts implement work now grouped under project Phase 9.
+- Current development priority is the reproducible Phase 9/10 Mallala validation/runtime workflow. Phase 11A and 11B are retained as bounded optimisation-assurance diagnostics, not as permission to expand optimiser research.
+- Do not start or revive an optimiser experiment unless the current documentation's re-entry criteria are met and the engineering need is explicit.
+
+## Branch and agent workflow
+
+- Start each new task from current `main` unless explicitly instructed otherwise.
+- Use one focused branch/PR per task. Do not continue development on stale, superseded, or rejected PR branches.
+- If an old branch contains a potentially useful fix, first reproduce the failure on current `main`; then re-propose the smallest fix against current `main` with a regression test.
+- ChatGPT may implement code and documentation. Codex review should be used as an independent review step for non-trivial code changes when practical.
+- Review the actual diff and executable behaviour, not only the implementer's explanation. Do not assume a generated change is correct because its unit tests pass.
+- After a PR is merged or deliberately closed, delete its head branch unless there is a documented reason to retain it.
+
+## Verification before merge
+
+- A code change is not complete while it has a known runtime error, even if unit tests pass.
+- Run targeted tests for the changed behaviour and run the full test suite with `python -m pytest` before merge. Report the exact pass/fail/skip result; do not hide optional-dependency skips.
+- If a change affects a command-line script, long-running workflow, import path, file-loading path, or user-facing runtime path, execute the affected entry point on the smallest representative case available. Unit tests alone are not sufficient runtime verification.
+- For changes affecting the frozen Mallala baseline, its inputs, or baseline provenance, run `python scripts/r6_phase9_baseline_check.py` and require the fail-closed regression checks to pass.
+- For long optimisation workflows, use a bounded smoke/diagnostic run when a full optimisation is unnecessary. Record settings, termination reason, and any warnings.
+- If required proprietary/external data are unavailable in the execution environment, say so explicitly. Use synthetic or repository-contained smoke coverage where possible, and do not claim the unavailable end-to-end path was runtime-validated.
+- Do not weaken tolerances, disable checks, catch-and-ignore exceptions, or convert failures into warnings merely to obtain a green test run.
+
+## Pull-request evidence and review
+
+- PR descriptions for code changes should state scope, important assumptions, tests run, representative runtime commands run, skipped/unavailable checks, and known limitations.
+- Preserve the distinction between numerical regression, physics sensitivity, optimisation response, and validation evidence. Do not reduce validation to total lap time alone.
+- For long-running optimisation results, record initial state, control policy, sampling/grid settings, boundary margin, backend/workers, evaluation/sweep limits, termination reason, final step, and common-grid re-evaluation where applicable.
+- Resolve substantive code-review findings before merge, or document why a finding is not applicable.
+- Do not mark a roadmap phase complete merely because related code exists. Phase completion should be tied to the documented deliverables/gates or to an explicit decision that a remaining item is deferred with rationale.
