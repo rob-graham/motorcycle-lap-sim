@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 from pathlib import Path
 
@@ -20,6 +21,25 @@ SPEC.loader.exec_module(MODULE)
 ROOT = Path(__file__).parents[1]
 
 
+def test_canonical_text_sha256_normalises_line_endings(tmp_path):
+    lf = tmp_path / "lf.txt"
+    crlf = tmp_path / "crlf.txt"
+    cr = tmp_path / "cr.txt"
+    changed = tmp_path / "changed.txt"
+
+    canonical = b"alpha\nbeta\n"
+    lf.write_bytes(canonical)
+    crlf.write_bytes(b"alpha\r\nbeta\r\n")
+    cr.write_bytes(b"alpha\rbeta\r")
+    changed.write_bytes(b"alpha\ngamma\n")
+
+    expected = hashlib.sha256(canonical).hexdigest()
+    assert MODULE.canonical_text_sha256(lf) == expected
+    assert MODULE.canonical_text_sha256(crlf) == expected
+    assert MODULE.canonical_text_sha256(cr) == expected
+    assert MODULE.canonical_text_sha256(changed) != expected
+
+
 def test_frozen_controls_have_expected_identity_station_policy_and_bounds():
     controls_path = ROOT / MODULE.DEFAULT_CONTROLS
     track_path = ROOT / MODULE.DEFAULT_TRACK
@@ -30,9 +50,9 @@ def test_frozen_controls_have_expected_identity_station_policy_and_bounds():
 
     controls = MODULE.load_frozen_controls(controls_path, stations, lower, upper)
 
-    assert MODULE.sha256_file(controls_path) == MODULE.EXPECTED_CONTROLS_SHA256
-    assert MODULE.sha256_file(track_path) == MODULE.EXPECTED_TRACK_SHA256
-    assert MODULE.sha256_file(motorcycle_path) == MODULE.EXPECTED_MOTORCYCLE_SHA256
+    assert MODULE.canonical_text_sha256(controls_path) == MODULE.EXPECTED_CONTROLS_SHA256
+    assert MODULE.canonical_text_sha256(track_path) == MODULE.EXPECTED_TRACK_SHA256
+    assert MODULE.canonical_text_sha256(motorcycle_path) == MODULE.EXPECTED_MOTORCYCLE_SHA256
     assert len(stations) == MODULE.EXPECTED_CONTROL_COUNT == 52
     assert np.all(controls >= lower)
     assert np.all(controls <= upper)
@@ -64,9 +84,9 @@ def test_frozen_baseline_matches_executable_regression(monkeypatch):
     assert len(evaluations) == len(MODULE.OUTPUT_SPACINGS_M) == 3
     assert all(evaluation.feasible for evaluation in evaluations)
 
-    controls_hash = MODULE.sha256_file(MODULE.DEFAULT_CONTROLS)
-    track_hash = MODULE.sha256_file(MODULE.DEFAULT_TRACK)
-    motorcycle_hash = MODULE.sha256_file(MODULE.DEFAULT_MOTORCYCLE)
+    controls_hash = MODULE.canonical_text_sha256(MODULE.DEFAULT_CONTROLS)
+    track_hash = MODULE.canonical_text_sha256(MODULE.DEFAULT_TRACK)
+    motorcycle_hash = MODULE.canonical_text_sha256(MODULE.DEFAULT_MOTORCYCLE)
     MODULE.verify_default_regression(
         controls_hash, track_hash, motorcycle_hash, evaluations)
 
