@@ -46,8 +46,8 @@ EXPECTED_MALLALA_CORNERS = 9
 
 # Groups of analytic reference-track primitives that represent Mallala T1-T9.
 # T3, T6 and T7 are compound same-direction bends in the current approximate
-# reference geometry.  This case-specific mapping is used only to reject
-# straight/setup lean artefacts after the generic lean-hysteresis detector.
+# reference geometry.  This case-specific mapping consolidates raw lean regions without changing
+# the generic lean-hysteresis detector.
 MALLALA_CORNER_PRIMITIVE_GROUPS = (
     (1,),
     (3,),
@@ -67,9 +67,14 @@ EVENT_FIELDS = (
     "display_on_map",
 )
 
+CORNER_REVIEW_FIELDS = (
+    "raw_region_index", "nominal_corner", "raw_start_s_m", "raw_end_s_m",
+    "consolidated_start_s_m", "consolidated_end_s_m", "turn_sign",
+    "peak_abs_lean_deg", "peak_abs_curvature_1pm", "assignment_rule", "confidence",
+)
+
 MAP_EVENT_TYPES = (
     "braking_onset",
-    "brake_release",
     "turn_in",
     "geometric_apex",
     "positive_drive_pickup",
@@ -151,51 +156,112 @@ def _mallala_corner_windows(track):
     return tuple(windows)
 
 
+def _mallala_corner_ownership_intervals(track):
+    """Return T1--T9 ownership intervals bounded at adjacent-straight midpoints.
+
+    The corner arcs are deliberately not used as hard detection bounds.  Each
+    nominal corner owns half of its approach and exit straight, which admits
+    racing-line turn-in and exit chainages outside the centreline arc.  T1's
+    interval wraps across start/finish and is represented by two intervals.
+    """
+    starts = np.asarray(track.primitive_start_s_m, dtype=float)
+    lap_length = float(starts[-1])
+    ownership = []
+    for group in MALLALA_CORNER_PRIMITIVE_GROUPS:
+        first, last = min(group), max(group)
+        before = first - 1
+        after = last + 1
+        if before < 0 or after >= len(track.primitives):
+            raise RuntimeError("Mallala corner must be bounded by straight primitives")
+        start = 0.5 * (starts[before] + starts[first])
+        end = 0.5 * (starts[after] + starts[after + 1])
+        if first == 1:  # preceding straight is primitive 22 across start/finish
+            start = 0.5 * (starts[-2] + lap_length)
+            ownership.append(((start, lap_length), (0.0, end)))
+        else:
+            ownership.append(((float(start), float(end)),))
+    return tuple(ownership)
+
+
 def _interval_overlap_m(start_a, end_a, start_b, end_b):
     return max(0.0, min(end_a, end_b) - max(start_a, start_b))
 
 
-def _select_mallala_corner_regions(track, columns, raw_regions):
-    """Map generic lean regions one-to-one onto the nine Mallala corner windows.
+def _consolidate_mallala_corner_regions(
+        track, columns, raw_regions, *, allow_unassigned=False):
+    """Assign generic lean regions to nominal Mallala corners and consolidate.
 
-    The generic detector can legitimately report sustained lean on a straight
-    because the optimised racing line may curve slightly while setting up for a
-    bend.  For this Mallala integration case, retain only the unique detected
-    region having the largest positive chainage overlap with each T1-T9
-    reference-geometry window.  Fail closed if the mapping is not one-to-one.
+    Ownership uses the primitive-defined corner plus half of each neighbouring
+    straight.  Direction must agree with the reference arcs.  Regions which do
+    not satisfy both rules are never silently discarded: callers either get a
+    clear exception or, for the review-producing CLI, an explicit unassigned
+    review row.  More than one raw region may belong to a compound corner.
     """
     track_s = np.asarray(columns["track_s_m"], dtype=float)
-    windows = _mallala_corner_windows(track)
-    selected = []
-    used = set()
-    diagnostics = []
+    lean = np.asarray(columns["roll_angle_deg"], dtype=float)
+    curvature = np.asarray(columns["path_curvature_1pm"], dtype=float)
+    ownership = _mallala_corner_ownership_intervals(track)
+    expected_signs = tuple(
+        1 if track.primitives[group[0]].turn_angle_rad > 0.0 else -1
+        for group in MALLALA_CORNER_PRIMITIVE_GROUPS)
+    assignments = [[] for _ in MALLALA_CORNER_PRIMITIVE_GROUPS]
+    raw_details = []
 
-    for corner_number, (window_start, window_end) in enumerate(windows, start=1):
-        candidates = []
-        for raw_index, (start, end) in enumerate(raw_regions):
-            region_start = float(track_s[start])
-            region_end = float(track_s[end])
-            overlap = _interval_overlap_m(
-                region_start, region_end, window_start, window_end)
-            if overlap > 0.0:
-                candidates.append((overlap, raw_index, start, end))
-        candidates.sort(reverse=True)
-        if not candidates:
+    for raw_index, (start, end) in enumerate(raw_regions, start=1):
+        raw_start, raw_end = float(track_s[start]), float(track_s[end])
+        sign = 1 if lean[start + int(np.argmax(np.abs(lean[start:end + 1])))] >= 0 else -1
+        overlaps = [
+            sum(_interval_overlap_m(raw_start, raw_end, a, b) for a, b in intervals)
+            if sign == expected_signs[number] else 0.0
+            for number, intervals in enumerate(ownership)
+        ]
+        maximum = max(overlaps, default=0.0)
+        candidates = [i for i, overlap in enumerate(overlaps)
+                      if overlap > 0.0 and np.isclose(overlap, maximum, atol=1e-9)]
+        if len(candidates) > 1:
+            names = ", ".join(f"T{i + 1}" for i in candidates)
+            raise ValueError(f"raw region {raw_index} has ambiguous Mallala ownership: {names}")
+        corner_index = candidates[0] if candidates else None
+        if corner_index is None and not allow_unassigned:
             raise ValueError(
-                f"no detected lean region overlaps Mallala T{corner_number} "
-                f"reference window {window_start:.3f}:{window_end:.3f} m")
-        overlap, raw_index, start, end = candidates[0]
-        if raw_index in used:
-            raise ValueError(
-                f"detected lean region {raw_index + 1} maps to more than one Mallala corner")
-        used.add(raw_index)
-        selected.append((start, end))
-        diagnostics.append((corner_number, raw_index + 1, overlap, window_start, window_end))
+                f"raw region {raw_index} is unassigned: no direction-compatible "
+                "Mallala ownership interval")
+        if corner_index is not None:
+            assignments[corner_index].append((start, end))
+        raw_details.append((raw_index, start, end, sign, corner_index, maximum))
 
-    if len(selected) != EXPECTED_MALLALA_CORNERS:
-        raise ValueError(
-            f"mapped {len(selected)} Mallala corner regions; expected {EXPECTED_MALLALA_CORNERS}")
-    return tuple(selected), tuple(diagnostics)
+    missing = [f"T{i + 1}" for i, assigned in enumerate(assignments) if not assigned]
+    if missing:
+        raise ValueError(f"nominal Mallala corners have no assigned raw region: {', '.join(missing)}")
+    consolidated = tuple((min(x[0] for x in assigned), max(x[1] for x in assigned))
+                         for assigned in assignments)
+    review = []
+    for raw_index, start, end, sign, corner_index, overlap in raw_details:
+        consolidated_region = consolidated[corner_index] if corner_index is not None else None
+        review.append({
+            "raw_region_index": raw_index,
+            "nominal_corner": "" if corner_index is None else f"T{corner_index + 1}",
+            "raw_start_s_m": float(track_s[start]),
+            "raw_end_s_m": float(track_s[end]),
+            "consolidated_start_s_m": "" if consolidated_region is None else
+                float(track_s[consolidated_region[0]]),
+            "consolidated_end_s_m": "" if consolidated_region is None else
+                float(track_s[consolidated_region[1]]),
+            "turn_sign": sign,
+            "peak_abs_lean_deg": float(np.max(np.abs(lean[start:end + 1]))),
+            "peak_abs_curvature_1pm": float(np.max(np.abs(curvature[start:end + 1]))),
+            "assignment_rule": ("unassigned_direction_or_ownership_mismatch" if corner_index is None
+                                else "maximum_chainage_overlap_with_mid_straight_ownership_and_turn_sign"),
+            "confidence": "review" if corner_index is None else ("high" if overlap > 0.0 else "low"),
+        })
+    return consolidated, tuple(review)
+
+
+def _write_corner_review_csv(path, review_rows):
+    with Path(path).open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=CORNER_REVIEW_FIELDS)
+        writer.writeheader()
+        writer.writerows(review_rows)
 
 
 def _write_events_csv(path, events):
@@ -339,8 +405,8 @@ def main(argv=None):
         track, evaluation.smooth_line, evaluation.speed_profile, bike)
     config = EventDetectionConfig()
     raw_regions = detect_corner_regions(columns, config)
-    corner_regions, corner_mapping = _select_mallala_corner_regions(
-        track, columns, raw_regions)
+    corner_regions, corner_review = _consolidate_mallala_corner_regions(
+        track, columns, raw_regions, allow_unassigned=True)
     events = extract_coaching_events(
         columns, config, corner_regions=corner_regions,
         expected_corner_count=EXPECTED_MALLALA_CORNERS)
@@ -348,9 +414,11 @@ def main(argv=None):
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trajectory_csv = args.output_dir / "phase12a_representative_trajectory.csv"
     events_csv = args.output_dir / "phase12a_coaching_events.csv"
-    coaching_png = args.output_dir / "phase12a_coaching_racing_line.png"
+    corner_review_csv = args.output_dir / "phase12a_corner_regions_review.csv"
+    coaching_png = args.output_dir / "phase12a_coaching_overview.png"
     trajectory.write_trajectory_csv(trajectory_csv, columns)
     _write_events_csv(events_csv, events)
+    _write_corner_review_csv(corner_review_csv, corner_review)
     _write_coaching_png(
         coaching_png, track, columns, events,
         max_roll_rate_radps=args.max_roll_rate_radps, dpi=args.plot_dpi)
@@ -377,17 +445,14 @@ def main(argv=None):
     print("speed_backend=python")
     print(f"lap_s={evaluation.lap_time_s:.9f}")
     print(f"lap_delta_from_phase11_reference_s={lap_delta:+.9f}")
-    print(f"raw_lean_region_count={len(raw_regions)}")
-    print(f"corner_count={counts['turn_in']}")
-    for corner_number, raw_number, overlap, window_start, window_end in corner_mapping:
-        print(
-            f"corner_mapping_T{corner_number}=raw_region_{raw_number} "
-            f"overlap_m={overlap:.6f} reference_window_m={window_start:.3f}:{window_end:.3f}")
+    print(f"raw_corner_region_count={len(raw_regions)}")
+    print(f"nominal_corner_count={counts['turn_in']}")
     for event_type, count in counts.items():
         print(f"event_count_{event_type}={count}")
     print(f"trajectory_csv={trajectory_csv}")
     print(f"coaching_events_csv={events_csv}")
-    print(f"coaching_racing_line_png={coaching_png}")
+    print(f"corner_regions_review_csv={corner_review_csv}")
+    print(f"coaching_overview_png={coaching_png}")
     print("visual_review_required=true")
     print("runoff_export_contract_status=deferred_until_after_visual_event_review")
     return {
