@@ -1,19 +1,31 @@
 # Motorcycle Lap Simulation
 
-A clean-sheet Python project for minimum-lap-time motorcycle simulation and
-racing-line optimisation. Phase 5 adds a deterministic first locally optimised
-minimum-lap-time racing line on top of the validated fixed-path architecture.
+A clean-sheet Python project for minimum-lap-time motorcycle simulation, racing-line optimisation, and Mallala R6 validation development.
 
-## Architecture and status
+The repository has progressed beyond the original Phase 8 documentation. It now contains the frozen Mallala baseline, telemetry ingestion/registration/comparison tools, a simple switchable finite-roll sensitivity model, roll-aware re-optimisation diagnostics, and later optimisation-assurance experiments.
 
-The numerical `track` package contains analytic centreline primitives, ordered
-tracks, closure diagnostics, arc-length sampling, and boundary calculation.
-The independent `motorcycle` package contains immutable validated configuration,
-engine and powertrain calculations, forces, load transfer, and physical limits.
-Plotting remains separate. The distinct `racing_line` package constructs a
-generic `SampledPath`; the separate `optimisation` package varies a smooth,
-periodic, boundary-safe line and minimises solved lap time; see
-[the system specification](docs/system_spec.md). Internal calculations use SI.
+For review, start with:
+
+- [simulation project context and source hierarchy](docs/project_context.md);
+- [system specification and implemented phase status](docs/system_spec.md);
+- [Phase 9 Mallala numerical baseline freeze](docs/phase9_baseline_freeze.md); and
+- [Mallala R6 telemetry integrity assessment](docs/mallala_r6_telemetry_integrity.md).
+
+The project-level roadmap and the repository serve different purposes: the roadmap defines intended development direction; repository code, tests, cases, and documentation define implemented behaviour.
+
+## Architecture
+
+The numerical code deliberately separates:
+
+- `track` — analytic track geometry, widths, sampling, and boundaries;
+- `path` / `racing_line` — supplied and spline-defined motorcycle paths;
+- `motorcycle` — immutable configuration, powertrain, forces, physical limits, and optional simple handling-response limits;
+- `speed_solver` — fastest feasible periodic speed on a supplied path;
+- `optimisation` — deterministic racing-line search using the fixed-path solver;
+- `telemetry` — import, quality, registration, map matching, and validation utilities; and
+- `plotting` / scripts — diagnostics and engineering review outputs.
+
+Internal calculations use SI units. Measured telemetry is not a hidden dependency of the physics solver.
 
 ## Install and test
 
@@ -22,44 +34,33 @@ python -m pip install -e '.[test]'
 python -m pytest
 ```
 
-The installed `pytest` console command is an optional shortcut. On Windows,
-the Python Scripts directory containing installed console commands may not be
-on `PATH`.
-
-## Motorcycle diagnostics
-
-From the repository root:
+For optional Numba acceleration:
 
 ```bash
-python -m motorcycle_lap_sim.motorcycle.diagnostics \
-    examples/motorcycles/test_motorcycle.yaml
+python -m pip install -e '.[test,accelerated]'
 ```
 
-This runs independent motorcycle-model checks; it is not a lap speed
-simulation.
+The Python fixed-path solver remains the authoritative reference backend. The optional Numba backend is a computational acceleration and is checked against the Python result for accepted paths.
 
-## Plot the example oval
+## Development/validation claim boundary
 
-From the repository root:
+The repository is a development and engineering-analysis tool. The current Mallala/R6 work is case-specific and provisional:
 
-```bash
-python -m motorcycle_lap_sim.plotting.track_plot \
-    examples/tracks/test_oval.yaml --output test_oval.png
-```
+- the Mallala geometry is an approximate development reference, not survey-grade;
+- the 2017+ R6 configuration is provisional and not a fully identified rider/motorcycle model;
+- the finite-roll parameter is a replaceable sensitivity scenario unless separately calibrated;
+- measured rider speed and line are validation evidence, not the optimisation target; and
+- no output claims regulatory approval, homologation, certification, or insurance acceptance.
 
-The installed console command
-`plot-example-track examples/tracks/test_oval.yaml --output test_oval.png` is an
-optional shortcut, with the same Windows `PATH` caveat described above.
+A total lap-time match by itself is not a validation criterion. Spatial speed, line, acceleration, transition behaviour, active constraints, and data quality must also be considered.
 
-The YAML format records a start pose, distinct left/right widths, closure
-intent, and an ordered list of straight and circular-arc primitives.
+## Core phase history
 
-## Phase 3 fixed-path solver
+### Phases 1-3: track, motorcycle and fixed-path solver
 
-Phase 3 calculates a periodic minimum-time speed profile on a supplied fixed closed path, currently demonstrated on the sampled track centreline. It does not optimise a racing line. See [the fixed-path solver](docs/fixed_path_solver.md).
+The repository began with analytic track primitives and boundaries, an independently testable motorcycle model, and a periodic fixed-path minimum-time solver. See [fixed-path solver](docs/fixed_path_solver.md).
 
-Run the fixed-path diagnostics on the example inputs with a requested sampling
-spacing (metres):
+Example fixed-path diagnostic:
 
 ```bash
 python -m motorcycle_lap_sim.speed_solver.diagnostics \
@@ -68,113 +69,95 @@ python -m motorcycle_lap_sim.speed_solver.diagnostics \
     --spacing 1.0
 ```
 
-Add `--csv speed-profile.csv` to export path coordinates and curvature, both
-speed ceilings, the solved speed, lateral and longitudinal acceleration, gear,
-and engine RPM. The console summary reports the sample count and path length,
-lap time, speed statistics, peak accelerations, gear and RPM ranges, and solver
-iteration/convergence information.
+### Phases 4-5: supplied and locally optimised racing lines
+
+Phase 4 added supplied lateral-offset paths. Phase 5 added smooth periodic parameterisation and deterministic local racing-line optimisation. The result is a numerical local optimum, not a global-optimality claim.
+
+See [racing-line representation](docs/racing_line_representation.md) and [racing-line optimisation](docs/racing_line_optimisation.md).
+
+### Phase 6: optional curvature-transient proxy
+
+An optional `max_path_curvature_rate_1pmps` handling proxy can add a curvature-transient speed ceiling. It remains a simple sensitivity feature rather than a validated steering-dynamics model. See [curvature transient limit](docs/curvature_transient_limit.md).
+
+### Phases 7-8: smooth planar paths and direct physical controls
+
+Phase 7 added a C2-periodic Cartesian path spline. Phase 7.5 integrated the approximate Mallala reference and variable primitive widths. Phase 8 added direct physical lateral controls, continuous corridor checks, warm starts, deterministic best-improvement search, optional parallel polling, and fixed-grid re-evaluation.
+
+See [smooth planar racing line](docs/smooth_planar_racing_line.md), [Mallala reference track](docs/mallala_reference_track.md), and [direct planar optimisation](docs/direct_planar_racing_line_optimisation.md).
+
+## Current Mallala baseline and validation work
+
+### Frozen ideal-response baseline
+
+The retained representative Mallala baseline uses the 52-control Phase 8 line stored in:
+
+`cases/mallala_r6/baseline/phase8_reference_controls.csv`
+
+Its canonical identities and regression values are recorded in [Phase 9 baseline freeze](docs/phase9_baseline_freeze.md). Reproduce the saved geometry without re-running optimisation using:
+
+```bash
+python scripts/r6_phase9_baseline_check.py
+```
+
+Fresh local optimisation is not expected to reproduce the historical path exactly; numerical change control is based on the committed saved geometry.
+
+### Mallala R6 telemetry
+
+The `telemetry` package and diagnostic scripts support AiM/Excel ingestion, lap extraction, quality checks, rigid 2D registration, map matching, cross-lap/peer comparison, repeatability checks, and speed comparison.
+
+The source workbook is not committed; its identity is recorded separately in the case manifest. See [Mallala R6 telemetry integrity](docs/mallala_r6_telemetry_integrity.md).
+
+Historical repository script names use `phase10` for some telemetry work even though the current project roadmap groups baseline, telemetry and initial roll-response work under **Phase 9**. Reviewers should use [project context](docs/project_context.md) and [system specification](docs/system_spec.md), not infer roadmap meaning from script numbering alone.
+
+### Level-1 finite-roll sensitivity
+
+The simulator now includes planar demanded lean and a simple trajectory-driven roll-transition constraint. The implemented finite-roll sensitivity uses an explicit `max_roll_rate_radps` in motorcycle handling configuration and can be disabled to reproduce the ideal-response baseline.
+
+This is deliberately not a full rider/steering dynamics model. Values used in diagnostics, including `0.8 rad/s`, are scenarios unless separately supported by calibration evidence.
+
+Relevant implementation and diagnostics include:
+
+- `src/motorcycle_lap_sim/motorcycle/roll.py`;
+- `scripts/r6_phase9f_roll_aware_optimisation.py`;
+- `scripts/r6_phase9f_spatial_comparison.py`;
+- `scripts/r6_phase9g_roll_rate_components.py`;
+- `scripts/r6_phase9g_sector_diagnostics.py`; and
+- `scripts/r6_phase10_trajectory_export.py`.
+
+The intended comparison separates:
+
+1. frozen ideal-response line;
+2. the same line with finite roll response;
+3. a line re-optimised with finite roll response; and
+4. measured Mallala R6 behaviour.
+
+That separation prevents a physics change, path adaptation, and measurement discrepancy from being conflated.
+
+## Calibration boundary
+
+Substantial R6 parameter fitting is intentionally restrained until the roll/telemetry discrepancy is understood. Mass, power, drag, grip/utilisation, gearing/radius corrections, edge margin, and handling response can compensate for each other.
+
+Any calibration work should therefore use a small bounded identifiable subset, retain documented defaults, use hold-out laps, and report local/sector metrics. The valid claim is a **Mallala R6 case calibration/validation** where supported, not general motorcycle-model validation.
+
+## Optimisation-assurance diagnostics
+
+The repository also contains later `r6_phase11a_*`, `r6_phase11b_*`, and `r6_phase11c_*` scripts. These are diagnostic experiments assessing warm-start and basin/convergence limitations of the existing deterministic pattern search. They are not a production replacement optimiser and do not prove global optimality.
+
+Their main review value is to show that generic-start spread can arise from limited search convergence. It should not be mislabelled as physical uncertainty, and progressively larger brute-force search budgets are not the primary Mallala validation objective.
 
 ## Provisional 2017+ Yamaha YZF-R6 reference
 
-The repository includes a provisional stock-like 2017+ R6 reference. It is not
-an exact model-year reconstruction or an experimentally validated motorcycle;
-see the [calibration and provenance record](docs/r6_2017plus_calibration.md).
-Run its independent motorcycle and fixed-path diagnostics from the repository
-root:
+The repository includes a stock-like 2017+ R6 reference configuration. It is not an exact model-year reconstruction or experimentally validated motorcycle. See [calibration and provenance record](docs/r6_2017plus_calibration.md).
+
+Independent diagnostics:
 
 ```bash
 python -m motorcycle_lap_sim.motorcycle.diagnostics \
     examples/motorcycles/r6_2017plus_reference.yaml
-
-python -m motorcycle_lap_sim.speed_solver.diagnostics \
-    examples/tracks/test_oval.yaml \
-    examples/motorcycles/r6_2017plus_reference.yaml \
-    --spacing 1.0 --csv r6_2017plus_test_oval.csv
 ```
 
-The inline torque curve is a smooth stock-like rear-wheel estimate. The
-reported lap time consequently remains provisional and must not be interpreted
-as experimental validation.
+## Future project interfaces
 
-## Phase 4 supplied racing line
+The wider track-layout project roadmap proposes later formal coaching-event extraction, robust line/envelope outputs, GIS/georeferencing, LiDAR/DEM-derived `TrackSurface` / `z(s,n)` support, grade/banking in the lap solver, and a separate run-off package consuming versioned simulation outputs.
 
-Phase 4 accepts one lateral offset per sampled centreline station, validates it
-against track widths, and calculates displaced coordinates, chordal arc length,
-and periodic signed curvature. Positive offset is left of travel. See the
-[racing-line representation](docs/racing_line_representation.md).
-
-```bash
-python -m motorcycle_lap_sim.racing_line.diagnostics \
-    examples/tracks/test_oval.yaml --spacing 1.0 --constant-offset 2.0 \
-    --csv racing-line.csv --output-png racing-line.png
-```
-
-The `+2 m` example is deterministic manual geometry for inspection, not an
-optimal line.
-
-## Phase 5 local racing-line optimisation
-
-Phase 5 uses a low-dimensional periodic cubic parameterisation and deterministic
-bounded pattern search, without SciPy. Its result is numerical and local, not a
-claim of global optimality. See [racing-line optimisation](docs/racing_line_optimisation.md).
-
-```bash
-python -m motorcycle_lap_sim.optimisation.diagnostics \
-  examples/tracks/test_oval.yaml \
-  examples/motorcycles/r6_2017plus_reference.yaml \
-  --spacing 1.0 --validation-spacing 0.5 --controls 12 \
-  --boundary-margin 0.25 --output-csv optimised-line.csv \
-  --output-png optimised-line.png
-```
-
-## Phase 6: path-curvature transient proxy
-
-Phase 6 adds an optional, deterministic path-curvature transient speed ceiling to the fixed-path solver, while retaining the Phase 5 racing-line optimiser. It is a path-handling proxy—not a validated steering-dynamics model. See [`docs/curvature_transient_limit.md`](docs/curvature_transient_limit.md) for the formula, units, assumptions, diagnostics, and resolution guidance.
-
-## Phase 7 experimental planar racing line
-
-Track specifications remain piecewise analytic straights and circular arcs, including intentional curvature jumps. Phase 7 adds an alternative C2-periodic Cartesian motorcycle-path spline for side-by-side validation; it does not replace the Phase 5 offset-sampled optimiser default. See [the smooth planar racing-line design](docs/smooth_planar_racing_line.md) and run `python scripts/r6_phase7_planar_geometry_check.py` for reproducible comparisons.
-
-## Phase 7.5 Mallala reference track
-
-The QGIS-derived Mallala v0.3 reference adds a 23-primitive real-world
-fixed-path validation circuit and optional per-primitive half-width overrides.
-Global `width_left_m` and `width_right_m` remain defaults; either may be
-overridden on a primitive while the other inherits:
-
-```yaml
-width_left_m: 4.0
-width_right_m: 4.0
-primitives:
-  - type: straight
-    length_m: 100.0
-    width_left_m: 5.0
-```
-
-Run `python scripts/r6_mallala_reference_check.py` for the 2.0/1.0/0.5 m R6
-centreline resolution diagnostic and equal-scale boundary plot. See the
-[Mallala provenance, assumptions, and limitations](docs/mallala_reference_track.md).
-No racing-line optimisation is performed for Mallala in this phase.
-## Phase 8 direct planar racing-line optimisation
-
-Phase 8 provides an alternative direct Cartesian optimiser with physical
-lateral controls placed from analytic primitive geometry. It preserves Phase 5
-and separates control-policy (path-model) resolution from fixed-spline sampling
-resolution. See [the Phase 8 design](docs/direct_planar_racing_line_optimisation.md).
-
-### Optional Numba fixed-path backend
-
-The existing Python `solve_speed_profile` remains the authoritative reference
-backend. An explicitly imported, optional Numba implementation can be installed
-with `python -m pip install -e ".[accelerated]"` and called as
-`speed_solver.numba_backend.solve_speed_profile_numba`. Its cached numerical
-kernels compile torque interpolation, gear selection, load transfer, combined
-tyre limits, 60-step capability bisections, and cyclic propagation. `fastmath`
-is deliberately disabled and inner Numba parallelism is deliberately not used.
-The Phase 8 optimiser is **not** switched to this backend yet.
-
-Run the fixed, zero-control Mallala comparison and timing diagnostic with:
-
-```bash
-python scripts/r6_numba_speed_solver_check.py --repeats 3
-```
+Those are future interfaces, not current capability claims unless implemented code and tests explicitly support them.
