@@ -182,8 +182,7 @@ def _write_summary(path, rows):
         writer.writerows(rows)
 
 
-def _write_racing_line_png(path, track, baseline, candidate, index, original_station,
-                           candidate_station, *, margin_m, dpi):
+def _write_racing_line_png(path, track, baseline, candidate, index, *, margin_m, dpi):
     checked_s = candidate.smooth_line.evaluated_track_s_m
     checked_track = sample_track_stations(track, checked_s)
     left_x = checked_track.x_m + checked_track.width_left_m * checked_track.normal_x
@@ -199,13 +198,10 @@ def _write_racing_line_png(path, track, baseline, candidate, index, original_sta
     baseline_x, baseline_y, *_ = baseline.smooth_line.spline.evaluate(checked_s)
     candidate_x, candidate_y, *_ = candidate.smooth_line.spline.evaluate(checked_s)
 
-    original_track = sample_track_stations(track, np.array([original_station]))
-    candidate_track = sample_track_stations(track, np.array([candidate_station]))
-    offset = float(baseline.smooth_line.guide_offsets_m[index])
-    original_x = float(original_track.x_m[0] + offset * original_track.normal_x[0])
-    original_y = float(original_track.y_m[0] + offset * original_track.normal_y[0])
-    moved_x = float(candidate_track.x_m[0] + offset * candidate_track.normal_x[0])
-    moved_y = float(candidate_track.y_m[0] + offset * candidate_track.normal_y[0])
+    original_x = float(baseline.smooth_line.guide_x_m[index])
+    original_y = float(baseline.smooth_line.guide_y_m[index])
+    moved_x = float(candidate.smooth_line.guide_x_m[index])
+    moved_y = float(candidate.smooth_line.guide_y_m[index])
     sf_left, sf_right = _start_finish_segment(track)
 
     figure, axis = plt.subplots(figsize=(12, 9))
@@ -389,7 +385,7 @@ def main(argv=None):
         _write_racing_line_csv(racing_csv, track, baseline_common, evaluation)
         _write_racing_line_png(
             racing_png, track, baseline_common, evaluation, index,
-            float(stations[index]), float(moved[index]), margin_m=args.margin_m, dpi=args.plot_dpi)
+            margin_m=args.margin_m, dpi=args.plot_dpi)
         print(f"best_common_grid_relocation_original_index={index}")
         print(f"best_common_grid_relocation_original_station_m={stations[index]:.9f}")
         print(f"best_common_grid_relocation_shift_m={shift:.9f}")
