@@ -45,3 +45,15 @@ def test_relocated_basis_rejects_neighbour_crossing():
 def test_relocation_shift_must_be_nonzero_in_main(tmp_path):
     with pytest.raises(ValueError, match="finite and non-zero"):
         module.main(["missing.csv", str(tmp_path), "--relocate-shift-m", "0"])
+
+
+def test_compact_discards_heavy_candidate_results():
+    evaluation = module.PlanarObjectiveEvaluation(
+        True, 71.25, smooth_line=object(), speed_profile=object())
+
+    compact = module._compact(evaluation)
+
+    assert compact.feasible
+    assert compact.lap_time_s == 71.25
+    assert compact.smooth_line is None
+    assert compact.speed_profile is None

@@ -315,15 +315,23 @@ def main(argv=None):
         speed_backend=args.speed_backend,
     )
 
-    def evaluate(candidate):
+    def evaluate_full(candidate):
         return evaluate_planar_racing_line(candidate, track, bike, moved_stations, **kwargs)
 
+    def evaluate(candidate):
+        # A complete poll can contain hundreds of candidates.  Retaining every
+        # sampled line and speed profile until selection makes the serial path
+        # consume several gigabytes on the Mallala grid.  Search decisions need
+        # only feasibility, lap time and the failure reason; regenerate the
+        # selected controls below for reporting and common-grid evaluation.
+        return _compact(evaluate_full(candidate))
+
     def materialise(candidate, worker_evaluation):
-        regenerated = evaluate(candidate)
+        regenerated = evaluate_full(candidate)
         if not regenerated.feasible:
-            raise RuntimeError("parallel relocated-basis winner failed parent materialisation")
+            raise RuntimeError("relocated-basis winner failed parent materialisation")
         if abs(regenerated.lap_time_s - worker_evaluation.lap_time_s) > 1e-9:
-            raise RuntimeError("parallel relocated-basis winner disagreed with parent evaluation")
+            raise RuntimeError("relocated-basis winner disagreed with parent evaluation")
         return regenerated
 
     started = time.perf_counter()
@@ -345,6 +353,10 @@ def main(argv=None):
                     lambda candidates: executor.map(_worker_evaluate, candidates),
                     materialise))
     optimisation_elapsed = time.perf_counter() - started
+    # The search deliberately carries compact evaluations in both serial and
+    # parallel modes.  Materialise the final state once, including a possible
+    # accepted pattern move, before consuming geometry or speed-profile data.
+    best = materialise(best_controls, best)
 
     baseline_common = _require_feasible(
         evaluate_planar_racing_line(
