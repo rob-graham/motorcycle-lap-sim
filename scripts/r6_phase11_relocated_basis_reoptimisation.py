@@ -180,6 +180,16 @@ def _start_finish_segment(track):
     )
 
 
+def _guide_point(track, smooth_line, index, station_m):
+    """Return one physical guide point using the planar result's stored offset."""
+    sampled = sample_track_stations(track, np.array([station_m]))
+    offset = float(smooth_line.guide_offset_m[index])
+    return (
+        float(sampled.x_m[0] + offset * sampled.normal_x[0]),
+        float(sampled.y_m[0] + offset * sampled.normal_y[0]),
+    )
+
+
 def _write_racing_line_csv(path, track, baseline, relocated):
     count = len(relocated.smooth_line.sampled_path.q_m)
     track_s = np.arange(count, dtype=float) * track.total_length_m / count
@@ -216,14 +226,10 @@ def _write_racing_line_png(path, track, baseline, relocated, index,
     base_x, base_y, *_ = baseline.smooth_line.spline.evaluate(checked_s)
     moved_x, moved_y, *_ = relocated.smooth_line.spline.evaluate(checked_s)
 
-    original_track = sample_track_stations(track, np.array([original_station]))
-    moved_track = sample_track_stations(track, np.array([moved_station]))
-    original_offset = float(baseline.smooth_line.guide_offsets_m[index])
-    original_x = float(original_track.x_m[0] + original_offset * original_track.normal_x[0])
-    original_y = float(original_track.y_m[0] + original_offset * original_track.normal_y[0])
-    final_offset = float(relocated.smooth_line.guide_offsets_m[index])
-    guide_x = float(moved_track.x_m[0] + final_offset * moved_track.normal_x[0])
-    guide_y = float(moved_track.y_m[0] + final_offset * moved_track.normal_y[0])
+    original_x, original_y = _guide_point(
+        track, baseline.smooth_line, index, original_station)
+    guide_x, guide_y = _guide_point(
+        track, relocated.smooth_line, index, moved_station)
     sf_left, sf_right = _start_finish_segment(track)
 
     figure, axis = plt.subplots(figsize=(12, 9))
