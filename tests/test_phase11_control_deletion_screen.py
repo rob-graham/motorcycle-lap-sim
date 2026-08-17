@@ -71,17 +71,15 @@ def test_reference_mallala_has_deletable_control_on_first_primitive():
 
 
 def test_geometry_displacement_zero_for_identical_spline():
+    from motorcycle_lap_sim.racing_line import PeriodicPlanarSpline
+
     track = phase11.Track.from_yaml(phase11.phase9.DEFAULT_TRACK)
     stations = phase11.generate_planar_control_stations(
         track, phase11.REFERENCE_PLANAR_CONTROL_POLICY)
     sampled = phase11.sample_track_stations(track, stations)
-    spline = phase11.phase8.PeriodicPlanarSpline if hasattr(phase11.phase8, "PeriodicPlanarSpline") else None
-
-    # Use the normal public path builder indirectly through one zero-control evaluation
-    # only when constructing a real spline is required by the helper contract.
-    from motorcycle_lap_sim.racing_line import PeriodicPlanarSpline
     candidate = PeriodicPlanarSpline(
         stations, sampled.x_m, sampled.y_m, track.total_length_m)
+
     maximum, rms = phase11.geometry_displacement(
         candidate, candidate, track.total_length_m, 5.0)
 
