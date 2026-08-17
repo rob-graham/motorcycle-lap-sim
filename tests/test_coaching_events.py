@@ -19,10 +19,10 @@ def _columns():
     speed[172:205] = np.linspace(18.0, 34.0, 33)
     acceleration = np.zeros(count)
     acceleration[35:70] = -2.0
-    acceleration[70:76] = -0.4
+    acceleration[70:76] = -0.1
     acceleration[80:110] = 1.0
     acceleration[135:170] = -2.2
-    acceleration[170:176] = -0.4
+    acceleration[170:176] = -0.1
     acceleration[180:210] = 0.9
     gear = np.full(count, 4.0)
     gear[100:] = 5.0
@@ -64,6 +64,27 @@ def test_extract_coaching_events_finds_core_rider_landmarks():
         assert by_corner[corner]["positive_drive_pickup"].track_s_m > by_corner[corner]["geometric_apex"].track_s_m
     assert any(event.event_type == "roll_transition" for event in events)
     assert any(event.event_type == "gear_shift" for event in events)
+
+
+def test_extract_coaching_events_accepts_case_specific_corner_regions():
+    columns = _columns()
+    events = extract_coaching_events(
+        columns, corner_regions=((50, 90), (150, 190)), expected_corner_count=2)
+    turn_ins = [event for event in events if event.event_type == "turn_in"]
+    assert [event.sample_index for event in turn_ins] == [50, 150]
+
+
+def test_brake_release_is_not_fabricated_at_search_boundary():
+    columns = _columns()
+    acceleration = columns["longitudinal_acceleration_mps2"].copy()
+    acceleration[35:76] = -2.0
+    columns["longitudinal_acceleration_mps2"] = acceleration
+    events = extract_coaching_events(
+        columns, corner_regions=((50, 71),), expected_corner_count=1)
+    types = {event.event_type for event in events if event.corner == "T1"}
+    assert "braking_onset" in types
+    assert "maximum_braking" in types
+    assert "brake_release" not in types
 
 
 def test_expected_corner_count_fails_closed():
