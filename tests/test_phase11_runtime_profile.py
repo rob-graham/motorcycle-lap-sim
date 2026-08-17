@@ -1,7 +1,10 @@
 import importlib.util
 from pathlib import Path
 
+import numpy as np
 import pytest
+
+from motorcycle_lap_sim.path import SampledPath
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "r6_phase11_runtime_profile.py"
@@ -28,6 +31,18 @@ def test_timing_summary_rejects_invalid_samples():
         phase11.timing_summary((0.1, float("nan")))
     with pytest.raises(ValueError, match="non-negative"):
         phase11.timing_summary((0.1, -0.2))
+
+
+def test_sampled_path_count_uses_q_coordinate():
+    path = SampledPath(
+        q_m=np.array([0.0, 1.0, 2.0]),
+        x_m=np.array([0.0, 1.0, 0.0]),
+        y_m=np.array([0.0, 0.0, 1.0]),
+        curvature_1pm=np.zeros(3),
+        total_length_m=3.0,
+    )
+
+    assert phase11.sampled_path_count(path) == 3
 
 
 def test_parser_defaults_match_phase11_runtime_case():
