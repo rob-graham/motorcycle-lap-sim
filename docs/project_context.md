@@ -82,31 +82,32 @@ A more complex dynamic lean/roll model is explicitly deferred unless the simpler
 
 ### Phase 10 - Mallala parameter calibration and hold-out validation
 
-The roadmap places substantial motorcycle-parameter calibration **after** the Phase 9 roll-response assessment to reduce the risk of compensating for missing handling physics by incorrectly changing power, grip, mass, drag, or related parameters.
+The roadmap placed substantial motorcycle-parameter calibration **after** the Phase 9 roll-response assessment to reduce the risk of compensating for missing handling physics by incorrectly changing power, grip, mass, drag, or related parameters.
 
-If calibration is pursued, it should:
+The full Mallala runtime chain has now been exercised on current `main` and the result is recorded in [`phase10_mallala_closure.md`](phase10_mallala_closure.md). The engineering decision is to close Phase 10 for the present sequence with **substantial parameter calibration deferred for identifiability reasons**.
 
-- use a deliberately small identifiable parameter subset;
-- use bounded parameters and documented defaults;
-- preserve a calibration/hold-out split;
-- re-run hold-out laps without further fitting;
-- avoid using roll-response parameters merely as lap-time tuning knobs; and
-- report local and sector validation metrics, not just total lap time.
+The current evidence shows that the frozen ideal-response case is reproducible, the measured-versus-model discrepancy is real and spatially structured, and finite-roll sensitivity explains a substantial physically plausible portion of that discrepancy without changing motorcycle performance parameters. The remaining difference cannot be uniquely assigned to mass, power, drag, grip/utilisation, gearing/radius, rider edge margin, roll response, approximate track geometry, or telemetry uncertainty strongly enough to justify fitting a bounded parameter subset from this one session.
 
-Candidate post-roll parameters include combined mass, torque/power scale, drag area, longitudinal/lateral utilisation, rolling-radius/gearing correction, and rider edge margin. These parameters can compensate for one another, so they must not all be fitted simultaneously.
+Accordingly:
 
-The correct classification is **Mallala R6 case calibration/validation**, not general motorcycle or track validation.
+- the R6 reference model remains provisional rather than calibrated;
+- `max_roll_rate_radps` remains a sensitivity/scenario parameter rather than an identified constant;
+- defaults are not changed merely to force total lap-time agreement;
+- Lap 5 remains the first future calibration/development candidate;
+- Lap 4 remains the first untouched hold-out candidate; and
+- Laps 1-3 remain additional out-of-fit comparisons.
+
+Future calibration may be reopened only when better measured bike/rider/setup inputs, improved track geometry, clarified logger/roll interpretation, additional sessions/riders, or a strongly attributable local discrepancy makes a small bounded parameter subset meaningfully identifiable. Any such work must preserve the calibration/hold-out split and report local/sector metrics, not just total lap time.
+
+The correct classification remains **Mallala R6 case validation**, not general motorcycle or track validation.
 
 ### Phase 11 - Optimisation assurance and robust line generation
 
-The roadmap contains a later assurance phase because a rider-facing or safety-analysis line should not be accepted merely because one local optimiser run produced it. It calls for multiple starts, common-grid ranking, resolution and margin sensitivity, and eventually an independent benchmark method.
+With the Phase 9/10 runtime workflow reproducible and its remaining validation gaps explicitly recorded, Phase 11 is now the next active development phase.
 
-The retained repository Phase 11A-B scripts are **bounded diagnostic assurance
-checks**, not a replacement production optimiser and not evidence of global
-optimality. They demonstrate practical warm-start/search limitations of the
-current deterministic coordinate-pattern method. The Phase 11C latent-search
-experiment was removed after review because it extended optimiser research
-without advancing the primary Phase 9/10 validation work.
+The roadmap contains an assurance phase because a rider-facing or safety-analysis line should not be accepted merely because one local optimiser run produced it. It calls for multiple starts, common-grid ranking, resolution and margin sensitivity, and eventually an independent benchmark method.
+
+The retained repository Phase 11A-B scripts are **bounded diagnostic assurance checks**, not a replacement production optimiser and not evidence of global optimality. They demonstrate practical warm-start/search limitations of the current deterministic coordinate-pattern method. The superseded Phase 11C/11D experiments must not be revived merely because the current optimiser is warm-start dependent. Any new optimisation work requires a stated engineering need, bounded benchmark, common-grid ranking, runtime reporting, deterministic reproduction, and meaningful tests.
 
 ### Later simulation-facing phases
 
@@ -130,10 +131,11 @@ As of the status date, the repository includes substantially more than the origi
 - fixed-line finite-roll sensitivity and roll-aware racing-line re-optimisation scripts;
 - sector/spatial diagnostics for comparing ideal, finite-roll, and measured behaviour;
 - trajectory export with speed, accelerations, lean, roll demand/ceiling, limits, gear and RPM;
+- an explicit Phase 10 closure record preserving the runtime validation evidence and calibration-deferral decision;
 - bounded optimisation-assurance diagnostics using multiple starts and hierarchical warm starts; and
 - an optional Numba fixed-path backend while retaining the Python solver as the authoritative reference.
 
-Detailed numerical baseline provenance is in [`phase9_baseline_freeze.md`](phase9_baseline_freeze.md). Telemetry source-quality findings are in [`mallala_r6_telemetry_integrity.md`](mallala_r6_telemetry_integrity.md). The implemented architecture is summarised in [`system_spec.md`](system_spec.md).
+Detailed numerical baseline provenance is in [`phase9_baseline_freeze.md`](phase9_baseline_freeze.md). Telemetry source-quality findings are in [`mallala_r6_telemetry_integrity.md`](mallala_r6_telemetry_integrity.md). Phase 10 closure evidence is in [`phase10_mallala_closure.md`](phase10_mallala_closure.md). The implemented architecture is summarised in [`system_spec.md`](system_spec.md).
 
 ## 6. Current evidence and interpretation boundaries
 
