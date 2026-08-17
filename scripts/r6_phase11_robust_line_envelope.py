@@ -1,11 +1,11 @@
 """Build a representative Phase 11 racing line and optimiser-spread envelope.
 
-This diagnostic does not optimise a new path.  It re-evaluates the retained
+This diagnostic does not optimise a new path. It re-evaluates the retained
 Mallala Phase 11 candidate lines on one authoritative Python common grid,
 quantifies their geometric spread at identical analytic track stations, and
-selects an existing feasible candidate as a representative reference by
-geometric medoid.  The envelope is optimiser/basis spread, not physical or
-statistical uncertainty.
+selects a representative from explicitly eligible, optimisation-assured
+candidates. The envelope is optimiser/basis spread, not physical or statistical
+uncertainty.
 """
 
 import argparse
@@ -36,6 +36,7 @@ DEFAULT_MARGIN_M = 0.25
 DEFAULT_MAX_ROLL_RATE_RADPS = 0.8
 DEFAULT_COMMON_SPACING_M = 0.125
 DEFAULT_BOUNDARY_CHECK_SPACING_M = 0.125
+DEFAULT_REPRESENTATIVE_MAX_LAP_DELTA_S = 0.05
 DEFAULT_PLOT_DPI = 400
 
 
@@ -47,6 +48,7 @@ class CandidateSpec:
     controls_sha256: str
     stations_m: np.ndarray
     controls_m: np.ndarray
+    representative_eligible: bool
     source_note: str
 
 
@@ -109,6 +111,12 @@ def build_parser():
                         default=DEFAULT_COMMON_SPACING_M)
     parser.add_argument("--boundary-check-spacing-m", type=_positive_float,
                         default=DEFAULT_BOUNDARY_CHECK_SPACING_M)
+    parser.add_argument(
+        "--representative-max-lap-delta-s", type=_nonnegative_float,
+        default=DEFAULT_REPRESENTATIVE_MAX_LAP_DELTA_S,
+        help=("maximum common-grid lap-time penalty allowed for the eligible geometric medoid; "
+              "if exceeded, use the fastest eligible candidate"),
+    )
     parser.add_argument("--plot-dpi", type=int, default=DEFAULT_PLOT_DPI)
     return parser
 
@@ -159,15 +167,20 @@ def pairwise_geometry(points_by_label, labels):
     return maximum, rms
 
 
-def select_geometric_medoid(labels, rms_matrix, lap_times_s):
-    """Choose an existing candidate with minimum mean RMS distance to peers.
+def select_representative_candidate(
+        labels, rms_matrix, lap_times_s, representative_eligible, max_lap_delta_s):
+    """Select an optimisation-assured representative with a lap-time guardrail.
 
-    Lap time is used only as a deterministic tie break; no synthetic median line
-    is created because an averaged path would require a fresh feasibility and
-    physics solution before it could be used as a reference.
+    The geometric medoid is calculated only among candidates explicitly marked
+    representative-eligible, so sensitivity-only perturbations cannot influence
+    representative centrality. If that eligible medoid is slower than the
+    fastest eligible candidate by more than ``max_lap_delta_s``, selection falls
+    back to the fastest eligible candidate. No synthetic median path is created.
     """
     if len(labels) < 2:
         raise ValueError("at least two candidate labels are required")
+    if not math.isfinite(max_lap_delta_s) or max_lap_delta_s < 0.0:
+        raise ValueError("representative maximum lap delta must be finite and non-negative")
     matrix = np.asarray(rms_matrix, dtype=float)
     if matrix.shape != (len(labels), len(labels)) or not np.all(np.isfinite(matrix)):
         raise ValueError("RMS matrix must be finite and square for the candidate labels")
@@ -175,13 +188,52 @@ def select_geometric_medoid(labels, rms_matrix, lap_times_s):
         raise ValueError("RMS matrix must be symmetric")
     if not np.allclose(np.diag(matrix), 0.0, rtol=0.0, atol=1e-12):
         raise ValueError("RMS matrix diagonal must be zero")
+    if set(representative_eligible) != set(labels):
+        raise ValueError("representative eligibility must be supplied for every candidate label")
+    if set(lap_times_s) != set(labels):
+        raise ValueError("lap times must be supplied for every candidate label")
 
-    means = np.sum(matrix, axis=1) / (len(labels) - 1)
-    ranked = sorted(
-        range(len(labels)),
-        key=lambda index: (float(means[index]), float(lap_times_s[labels[index]]), labels[index]),
+    eligible_indices = [
+        index for index, label in enumerate(labels) if bool(representative_eligible[label])]
+    if not eligible_indices:
+        raise ValueError("at least one representative-eligible candidate is required")
+
+    eligible_labels = [labels[index] for index in eligible_indices]
+    fastest_eligible_label = min(
+        eligible_labels, key=lambda label: (float(lap_times_s[label]), label))
+
+    eligible_means = {label: math.nan for label in labels}
+    if len(eligible_indices) == 1:
+        medoid_label = eligible_labels[0]
+        eligible_means[medoid_label] = 0.0
+    else:
+        for index in eligible_indices:
+            peer_distances = [
+                matrix[index, peer] for peer in eligible_indices if peer != index]
+            eligible_means[labels[index]] = float(np.mean(peer_distances))
+        medoid_label = min(
+            eligible_labels,
+            key=lambda label: (
+                eligible_means[label], float(lap_times_s[label]), label),
+        )
+
+    medoid_lap_delta_s = float(
+        lap_times_s[medoid_label] - lap_times_s[fastest_eligible_label])
+    if medoid_lap_delta_s <= max_lap_delta_s + 1e-12:
+        representative_label = medoid_label
+        selection_reason = "eligible_geometric_medoid_within_lap_delta"
+    else:
+        representative_label = fastest_eligible_label
+        selection_reason = "fastest_eligible_fallback_medoid_exceeds_lap_delta"
+
+    return (
+        representative_label,
+        medoid_label,
+        fastest_eligible_label,
+        eligible_means,
+        medoid_lap_delta_s,
+        selection_reason,
     )
-    return labels[ranked[0]], means
 
 
 def _require_feasible(evaluation, label):
@@ -239,17 +291,22 @@ def _evaluate_candidate(spec, track, bike, track_s, sampled_track,
     )
 
 
-def _write_candidate_summary(path, results, labels, fastest_label, representative_label,
-                             medoid_means, maximum_matrix, rms_matrix, margin_m):
+def _write_candidate_summary(
+        path, results, labels, fastest_label, fastest_eligible_label,
+        representative_label, medoid_label, eligible_means, maximum_matrix, rms_matrix,
+        margin_m, max_lap_delta_s):
     fastest_lap = float(results[fastest_label].evaluation.lap_time_s)
+    fastest_eligible_lap = float(results[fastest_eligible_label].evaluation.lap_time_s)
     representative_index = labels.index(representative_label)
     fields = (
         "label", "basis_kind", "controls_csv", "controls_sha256", "control_count",
-        "common_grid_lap_s", "delta_from_fastest_s", "minimum_usable_clearance_m",
-        "minimum_track_edge_clearance_m", "minimum_forward_progress",
-        "mean_pairwise_rms_displacement_m", "maximum_displacement_from_representative_m",
-        "rms_displacement_from_representative_m", "is_fastest", "is_representative",
-        "source_note",
+        "common_grid_lap_s", "delta_from_fastest_s", "delta_from_fastest_eligible_s",
+        "representative_eligible", "within_representative_lap_acceptance",
+        "eligible_mean_pairwise_rms_displacement_m", "is_eligible_geometric_medoid",
+        "minimum_usable_clearance_m", "minimum_track_edge_clearance_m",
+        "minimum_forward_progress", "maximum_displacement_from_representative_m",
+        "rms_displacement_from_representative_m", "is_fastest", "is_fastest_eligible",
+        "is_representative", "source_note",
     )
     with Path(path).open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -257,6 +314,9 @@ def _write_candidate_summary(path, results, labels, fastest_label, representativ
         for index, label in enumerate(labels):
             result = results[label]
             usable = float(result.evaluation.smooth_line.minimum_boundary_clearance_m)
+            eligible = bool(result.spec.representative_eligible)
+            eligible_delta = float(result.evaluation.lap_time_s - fastest_eligible_lap)
+            eligible_mean = eligible_means[label]
             writer.writerow({
                 "label": label,
                 "basis_kind": result.spec.basis_kind,
@@ -265,15 +325,22 @@ def _write_candidate_summary(path, results, labels, fastest_label, representativ
                 "control_count": len(result.spec.controls_m),
                 "common_grid_lap_s": float(result.evaluation.lap_time_s),
                 "delta_from_fastest_s": float(result.evaluation.lap_time_s - fastest_lap),
+                "delta_from_fastest_eligible_s": eligible_delta if eligible else "",
+                "representative_eligible": eligible,
+                "within_representative_lap_acceptance": (
+                    eligible and eligible_delta <= max_lap_delta_s + 1e-12),
+                "eligible_mean_pairwise_rms_displacement_m": (
+                    "" if math.isnan(eligible_mean) else eligible_mean),
+                "is_eligible_geometric_medoid": label == medoid_label,
                 "minimum_usable_clearance_m": usable,
                 "minimum_track_edge_clearance_m": usable + margin_m,
                 "minimum_forward_progress": result.minimum_forward_progress,
-                "mean_pairwise_rms_displacement_m": float(medoid_means[index]),
                 "maximum_displacement_from_representative_m": float(
                     maximum_matrix[index, representative_index]),
                 "rms_displacement_from_representative_m": float(
                     rms_matrix[index, representative_index]),
                 "is_fastest": label == fastest_label,
+                "is_fastest_eligible": label == fastest_eligible_label,
                 "is_representative": label == representative_label,
                 "source_note": result.spec.source_note,
             })
@@ -409,7 +476,8 @@ def _write_png(path, track, sampled_track, results, labels, representative_label
     axis.set_aspect("equal", adjustable="box")
     axis.set_xlabel("Local x (m)")
     axis.set_ylabel("Local y (m)")
-    axis.set_title(f"Mallala Phase 11 representative line and optimiser spread - {margin_m:.3f} m margin")
+    axis.set_title(
+        f"Mallala Phase 11 representative line and optimiser spread - {margin_m:.3f} m margin")
     axis.legend(fontsize="small")
     figure.tight_layout()
     figure.savefig(path, dpi=dpi)
@@ -465,24 +533,25 @@ def main(argv=None):
     candidates = (
         CandidateSpec(
             "baseline_restart3_52", "reference_52", args.baseline_controls_csv, baseline_hash,
-            standard_stations, baseline_controls,
+            standard_stations, baseline_controls, True,
             "retained restart3 52-control line",
         ),
         CandidateSpec(
             "reduced_reoptimised_51", f"delete_{args.delete_index}_51",
             args.reduced_controls_csv, phase9.sha256_file(args.reduced_controls_csv),
-            reduced_stations, reduced_controls,
+            reduced_stations, reduced_controls, True,
             f"PR #58 reduced basis after deleting original control {args.delete_index}",
         ),
         CandidateSpec(
             "relocated_fixed_offsets_52", f"relocate_{args.relocate_index}_fixed_offsets",
-            args.baseline_controls_csv, baseline_hash, relocated_stations, baseline_controls,
-            f"PR #59 fixed-offset relocation of control {args.relocate_index} by {args.relocate_shift_m:+.3f} m",
+            args.baseline_controls_csv, baseline_hash, relocated_stations, baseline_controls, False,
+            f"PR #59 fixed-offset relocation sensitivity of control {args.relocate_index} "
+            f"by {args.relocate_shift_m:+.3f} m; spread-only, not representative-eligible",
         ),
         CandidateSpec(
             "relocated_reoptimised_52", f"relocate_{args.relocate_index}_reoptimised",
             args.relocated_controls_csv, phase9.sha256_file(args.relocated_controls_csv),
-            relocated_stations, relocated_controls,
+            relocated_stations, relocated_controls, True,
             f"PR #60 bounded re-optimisation after control {args.relocate_index} relocation",
         ),
     )
@@ -514,7 +583,22 @@ def main(argv=None):
     maximum_matrix, rms_matrix = pairwise_geometry(points_by_label, labels)
     lap_times = {label: float(results[label].evaluation.lap_time_s) for label in labels}
     fastest_label = min(labels, key=lambda label: (lap_times[label], label))
-    representative_label, medoid_means = select_geometric_medoid(labels, rms_matrix, lap_times)
+    representative_eligible = {
+        candidate.label: candidate.representative_eligible for candidate in candidates}
+    (
+        representative_label,
+        medoid_label,
+        fastest_eligible_label,
+        eligible_means,
+        medoid_lap_delta_s,
+        selection_reason,
+    ) = select_representative_candidate(
+        labels,
+        rms_matrix,
+        lap_times,
+        representative_eligible,
+        args.representative_max_lap_delta_s,
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summary_csv = args.output_dir / "phase11_robust_line_candidate_summary.csv"
@@ -524,8 +608,19 @@ def main(argv=None):
     racing_png = args.output_dir / "phase11_representative_line_and_spread.png"
 
     _write_candidate_summary(
-        summary_csv, results, labels, fastest_label, representative_label,
-        medoid_means, maximum_matrix, rms_matrix, args.margin_m)
+        summary_csv,
+        results,
+        labels,
+        fastest_label,
+        fastest_eligible_label,
+        representative_label,
+        medoid_label,
+        eligible_means,
+        maximum_matrix,
+        rms_matrix,
+        args.margin_m,
+        args.representative_max_lap_delta_s,
+    )
     _write_pairwise_csv(pairwise_csv, labels, maximum_matrix, rms_matrix)
     _write_envelope_csv(
         envelope_csv, track, track_s, sampled_track, results, labels,
@@ -545,22 +640,36 @@ def main(argv=None):
     print(f"common_spacing_m={args.common_spacing_m:.6f}")
     print(f"boundary_check_spacing_m={args.boundary_check_spacing_m:.6f}")
     print("speed_backend=python")
-    print("reference_selection=geometric_medoid_of_existing_feasible_candidates")
     print("spread_interpretation=optimiser_and_control_basis_spread_not_physical_or_statistical_uncertainty")
+    print("representative_eligibility=retained_or_reoptimised_candidates_only")
+    print(f"representative_max_lap_delta_s={args.representative_max_lap_delta_s:.9f}")
+    print(f"representative_selection_reason={selection_reason}")
     for label in labels:
         result = results[label]
+        eligible_mean = eligible_means[label]
+        eligible_mean_text = "na" if math.isnan(eligible_mean) else f"{eligible_mean:.9f}"
         print(
             f"candidate={label} basis={result.spec.basis_kind} controls={len(result.spec.controls_m)} "
+            f"representative_eligible={str(result.spec.representative_eligible).lower()} "
+            f"eligible_mean_pairwise_rms_m={eligible_mean_text} "
             f"lap_s={result.evaluation.lap_time_s:.9f} "
             f"minimum_track_edge_clearance_m={result.evaluation.smooth_line.minimum_boundary_clearance_m + args.margin_m:.9f} "
             f"minimum_forward_progress={result.minimum_forward_progress:.12g}")
     print(f"fastest_label={fastest_label}")
     print(f"fastest_common_grid_lap_s={lap_times[fastest_label]:.9f}")
+    print(f"fastest_eligible_label={fastest_eligible_label}")
+    print(f"eligible_geometric_medoid_label={medoid_label}")
+    print(f"eligible_geometric_medoid_delta_from_fastest_s={medoid_lap_delta_s:.9f}")
     print(f"representative_label={representative_label}")
     print(f"representative_common_grid_lap_s={lap_times[representative_label]:.9f}")
     print(f"representative_delta_from_fastest_s={lap_times[representative_label] - lap_times[fastest_label]:.9f}")
-    print(f"representative_mean_pairwise_rms_displacement_m={medoid_means[representative_index]:.9f}")
-    print(f"fastest_mean_pairwise_rms_displacement_m={medoid_means[fastest_index]:.9f}")
+    representative_mean = eligible_means[representative_label]
+    print(f"representative_eligible_mean_pairwise_rms_displacement_m={representative_mean:.9f}")
+    fastest_mean = eligible_means[fastest_label]
+    fastest_mean_text = "na" if math.isnan(fastest_mean) else f"{fastest_mean:.9f}"
+    print(f"fastest_eligible_mean_pairwise_rms_displacement_m={fastest_mean_text}")
+    print(f"maximum_displacement_from_fastest_to_representative_m={maximum_matrix[fastest_index, representative_index]:.9f}")
+    print(f"rms_displacement_from_fastest_to_representative_m={rms_matrix[fastest_index, representative_index]:.9f}")
     print(f"maximum_envelope_width_m={float(np.max(spread)):.9f}")
     print(f"rms_envelope_width_m={float(np.sqrt(np.mean(spread ** 2))):.9f}")
     print(f"evaluation_elapsed_s={elapsed:.3f}")
@@ -572,7 +681,10 @@ def main(argv=None):
     return {
         "results": results,
         "fastest_label": fastest_label,
+        "fastest_eligible_label": fastest_eligible_label,
+        "eligible_geometric_medoid_label": medoid_label,
         "representative_label": representative_label,
+        "selection_reason": selection_reason,
         "maximum_envelope_width_m": float(np.max(spread)),
         "rms_envelope_width_m": float(np.sqrt(np.mean(spread ** 2))),
     }
