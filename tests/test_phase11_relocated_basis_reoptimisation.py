@@ -22,7 +22,7 @@ def test_parser_defaults():
     assert args.minimum_step_m == 0.0625
     assert args.max_sweeps == 12
     assert args.max_evaluations == 4000
-    assert args.workers == 16
+    assert args.workers == 1
     assert args.optimisation_spacing_m == 1.0
     assert args.common_spacing_m == 0.125
     assert args.boundary_check_spacing_m == 0.125

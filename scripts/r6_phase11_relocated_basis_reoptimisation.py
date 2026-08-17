@@ -16,7 +16,6 @@ import multiprocessing
 from pathlib import Path
 import time
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
@@ -42,12 +41,6 @@ def _load_sibling(filename, module_name):
     return module
 
 
-phase8 = _load_sibling("r6_phase8_planar_optimisation_check.py", "phase8_relocated_basis")
-phase9 = _load_sibling("r6_phase9_baseline_check.py", "phase9_relocated_basis")
-phase9f = _load_sibling("r6_phase9f_roll_aware_optimisation.py", "phase9f_relocated_basis")
-phase11screen = _load_sibling("r6_phase11_control_deletion_screen.py", "phase11_relocated_basis_screen")
-phase11reloc = _load_sibling("r6_phase11_control_station_relocation_screen.py", "phase11_relocation_screen")
-
 DEFAULT_RELOCATE_INDEX = 27
 DEFAULT_RELOCATE_SHIFT_M = 5.0
 DEFAULT_MINIMUM_STATION_GAP_M = 5.0
@@ -57,7 +50,10 @@ DEFAULT_INITIAL_STEP_M = 0.125
 DEFAULT_MINIMUM_STEP_M = 0.0625
 DEFAULT_MAX_SWEEPS = 12
 DEFAULT_MAX_EVALUATIONS = 4000
-DEFAULT_WORKERS = 16
+# Spawned workers each hold an independent scientific-Python runtime and Numba
+# state.  Keep the operationally safe default serial; higher counts are an
+# explicit resource decision after a bounded smoke run on the target machine.
+DEFAULT_WORKERS = 1
 DEFAULT_OPTIMISATION_SPACING_M = 1.0
 DEFAULT_COMMON_SPACING_M = 0.125
 DEFAULT_BOUNDARY_CHECK_SPACING_M = 0.125
@@ -123,6 +119,8 @@ def build_parser():
 
 
 def relocated_basis(stations, index, shift_m, track_length_m, minimum_gap_m):
+    phase11reloc = _load_sibling(
+        "r6_phase11_control_station_relocation_screen.py", "phase11_relocation_screen")
     moved = phase11reloc.relocated_stations(
         stations, index, shift_m, track_length_m, minimum_gap_m)
     if moved is None:
@@ -198,6 +196,11 @@ def _write_racing_line_csv(path, track, baseline, relocated):
 
 def _write_racing_line_png(path, track, baseline, relocated, index,
                            original_station, moved_station, *, margin_m, dpi):
+    # Plotting is parent-only.  Importing pyplot at module load makes every
+    # Windows spawn worker carry plotting state that objective evaluation does
+    # not use.
+    import matplotlib.pyplot as plt
+
     checked_s = relocated.smooth_line.evaluated_track_s_m
     checked_track = sample_track_stations(track, checked_s)
     left_x = checked_track.x_m + checked_track.width_left_m * checked_track.normal_x
@@ -263,6 +266,14 @@ def main(argv=None):
         raise ValueError("minimum step must not exceed initial step")
     if not math.isfinite(args.relocate_shift_m) or args.relocate_shift_m == 0.0:
         raise ValueError("relocation shift must be finite and non-zero")
+    # Load reporting/workflow siblings only in the parent process.  Under the
+    # Windows spawn start method, module-level loads are repeated in every
+    # worker and substantially amplify memory without helping evaluation.
+    phase8 = _load_sibling("r6_phase8_planar_optimisation_check.py", "phase8_relocated_basis")
+    phase9 = _load_sibling("r6_phase9_baseline_check.py", "phase9_relocated_basis")
+    phase9f = _load_sibling("r6_phase9f_roll_aware_optimisation.py", "phase9f_relocated_basis")
+    phase11screen = _load_sibling(
+        "r6_phase11_control_deletion_screen.py", "phase11_relocated_basis_screen")
     phase9f._require_canonical_inputs()
 
     track = Track.from_yaml(phase9.DEFAULT_TRACK)
