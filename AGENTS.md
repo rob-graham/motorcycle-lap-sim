@@ -21,8 +21,8 @@
 - Before non-trivial work, read `docs/project_context.md`, `docs/system_spec.md`, and `docs/development_scope_review.md`, plus the most relevant phase/method document for the task.
 - Repository code, tests, configuration, cases, and current repository documentation define implemented behaviour. External roadmap documents define intended direction, not implemented capability.
 - Do not infer roadmap phase status from historical script names alone. Some repository `phase10` scripts implement work now grouped under project Phase 9.
-- Current development priority is the reproducible Phase 9/10 Mallala validation/runtime workflow. Phase 11A and 11B are retained as bounded optimisation-assurance diagnostics, not as permission to expand optimiser research.
-- Do not start or revive an optimiser experiment unless the current documentation's re-entry criteria are met and the engineering need is explicit.
+- The Phase 9/10 Mallala validation/runtime workflow is reproducible and Phase 10 is closed for the present sequence with substantial calibration explicitly deferred for identifiability reasons; see `docs/phase10_mallala_closure.md`.
+- Current development priority is Phase 11 optimisation assurance and robust line generation, starting from the retained Phase 11A/B evidence and the documented re-entry criteria. Do not revive superseded Phase 11C/11D experiments without a new explicit engineering justification and bounded benchmark plan.
 
 ## Branch and agent workflow
 
