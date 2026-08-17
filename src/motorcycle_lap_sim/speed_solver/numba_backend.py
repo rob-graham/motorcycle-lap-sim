@@ -12,7 +12,6 @@ from numba import njit
 from motorcycle_lap_sim.motorcycle.roll import (
     curvature_transition_roll_rate_radps,
     demanded_lean_rad,
-    roll_rate_speed_limit_mps,
 )
 from motorcycle_lap_sim.path import (
     curvature_gradient_1pm2,
@@ -115,8 +114,8 @@ def _forward(speed, curvature, p):
     high = upper
     for _ in range(60):
         middle = (low + high) / 2
-        front, rear, _, fyr = _axle(speed, curvature, middle, mass, gravity,
-                                    wheelbase, cg_height, cg_from_rear)
+        front, rear, _, fyr = _axle(speed, curvature, middle, mass, gravity, wheelbase,
+                                    cg_height, cg_from_rear)
         margin = -inf
         if front >= 0 and rear >= 0:
             tyre = _maximum_longitudinal_force(fyr, rear, mu_longitudinal, mu_lateral)
@@ -150,6 +149,78 @@ def _braking(speed, curvature, p):
         else:
             high = middle
     return low
+
+
+@njit(cache=True, fastmath=False)
+def _roll_rate_demand(speed, curvature, curvature_gradient, gravity):
+    lean_ratio = speed * speed * curvature / gravity
+    return (speed ** 3 * curvature_gradient / gravity) / (1.0 + lean_ratio * lean_ratio)
+
+
+@njit(cache=True, fastmath=False)
+def _roll_rate_speed_limits(curvature, gradient, cap, max_roll_rate, gravity,
+                            bisection_iterations):
+    limit = np.full(curvature.shape, np.inf)
+    for index in range(curvature.size):
+        kappa = curvature[index]
+        kappa_gradient = gradient[index]
+        upper_cap = cap[index]
+        if kappa_gradient == 0.0 or upper_cap == 0.0:
+            continue
+
+        if kappa == 0.0:
+            search_upper = upper_cap
+        else:
+            sixty_degree_speed = sqrt(sqrt(3.0) * gravity / abs(kappa))
+            search_upper = min(upper_cap, sixty_degree_speed)
+
+        upper_rate = abs(_roll_rate_demand(
+            search_upper, kappa, kappa_gradient, gravity))
+        if upper_rate <= max_roll_rate:
+            continue
+
+        lower = 0.0
+        upper = search_upper
+        for _ in range(bisection_iterations):
+            middle = 0.5 * (lower + upper)
+            middle_rate = abs(_roll_rate_demand(
+                middle, kappa, kappa_gradient, gravity))
+            if middle_rate <= max_roll_rate:
+                lower = middle
+            else:
+                upper = middle
+        limit[index] = upper
+    return limit
+
+
+def roll_rate_speed_limit_numba(curvature_1pm, curvature_gradient_1pm2,
+                                speed_cap_mps, max_roll_rate_radps, *,
+                                gravity_mps2=9.80665, bisection_iterations=64):
+    """Numba equivalent of the authoritative Level-1 roll-rate speed ceiling."""
+    curvature = np.asarray(curvature_1pm, dtype=float)
+    gradient = np.asarray(curvature_gradient_1pm2, dtype=float)
+    cap = np.asarray(speed_cap_mps, dtype=float)
+    if curvature.shape != gradient.shape or curvature.shape != cap.shape:
+        raise ValueError("curvature, curvature gradient and speed cap must have identical shapes")
+    if (not np.isfinite(max_roll_rate_radps) or max_roll_rate_radps <= 0
+            or isinstance(max_roll_rate_radps, bool)):
+        raise ValueError("maximum roll rate must be finite and positive")
+    if not np.isfinite(gravity_mps2) or gravity_mps2 <= 0:
+        raise ValueError("gravity must be finite and positive")
+    if (isinstance(bisection_iterations, bool)
+            or not isinstance(bisection_iterations, int)
+            or bisection_iterations <= 0):
+        raise ValueError("bisection_iterations must be a positive integer")
+    if (not np.all(np.isfinite(curvature)) or not np.all(np.isfinite(gradient))
+            or not np.all(np.isfinite(cap)) or np.any(cap < 0)):
+        raise ValueError("roll-rate speed-limit inputs must be finite with non-negative speed caps")
+    limit = _roll_rate_speed_limits(
+        curvature, gradient, cap, float(max_roll_rate_radps), float(gravity_mps2),
+        bisection_iterations)
+    if np.any(np.isnan(limit)) or np.any(limit <= 0):
+        raise ValueError("roll-rate speed limits must be positive or infinity")
+    limit.setflags(write=False)
+    return limit
 
 
 @njit(cache=True, fastmath=False)
@@ -201,7 +272,7 @@ def solve_speed_profile_numba(path, bike, config=SolverConfig()):
     roll_limit = (
         np.full(count, np.inf)
         if handling is None or handling.max_roll_rate_radps is None
-        else roll_rate_speed_limit_mps(
+        else roll_rate_speed_limit_numba(
             path.curvature_1pm, gradient, pre_roll_cap,
             handling.max_roll_rate_radps,
             gravity_mps2=bike.environment.gravity_mps2))
