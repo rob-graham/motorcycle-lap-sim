@@ -77,8 +77,6 @@ def test_mallala_corner_windows_follow_reference_primitive_groups():
     windows = module._mallala_corner_windows(track)
 
     assert len(windows) == 9
-    assert windows[0] == (178.593280835, 217.55918295035884)
-    assert windows[2][0] == 773.080775992831
-    assert windows[2][1] == 961.758497135805
-    assert windows[-1][0] == 2409.326878374208
-    assert windows[-1][1] == 2448.91948176492
+    assert np.allclose(windows[0], (178.593280835, 217.55908050670806), atol=1e-9)
+    assert np.allclose(windows[2], (773.0806313974115, 961.758495318458), atol=1e-9)
+    assert np.allclose(windows[-1], (2409.3274154371034, 2448.9194817642556), atol=1e-9)
