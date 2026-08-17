@@ -478,7 +478,8 @@ def _write_summary(path, rows):
         "delta_final_minus_reviewed_common_s",
         "minimum_usable_clearance_m",
         "minimum_track_edge_clearance_m",
-        "objective_evaluations",
+        "objective_evaluations_total",
+        "objective_evaluations_solver",
         "invalid_objective_evaluations",
         "constraint_calls",
         "constraint_unique_evaluations",
@@ -613,6 +614,7 @@ def main(argv=None):
             args.speed_backend,
         )
         objective(start)
+        pre_solver_objective_evaluations = objective.evaluations
         nonlinear_constraint = NonlinearConstraint(
             scalar_constraints,
             lb=np.array([-PRODUCTION_BOUNDARY_TOL_M, -PRODUCTION_BOUNDARY_TOL_M, 0.0]),
@@ -637,6 +639,7 @@ def main(argv=None):
             },
         )
         elapsed = time.perf_counter() - started
+        solver_objective_evaluations = objective.evaluations - pre_solver_objective_evaluations
 
         if objective.best_controls is None:
             raise RuntimeError(f"margin {margin:.3f} m COBYQA benchmark found no production-feasible candidate")
@@ -681,7 +684,8 @@ def main(argv=None):
             "delta_final_minus_reviewed_common_s": float(final_common.lap_time_s - reviewed_lap),
             "minimum_usable_clearance_m": usable_clearance,
             "minimum_track_edge_clearance_m": usable_clearance + margin,
-            "objective_evaluations": int(objective.evaluations),
+            "objective_evaluations_total": int(objective.evaluations),
+            "objective_evaluations_solver": int(solver_objective_evaluations),
             "invalid_objective_evaluations": int(objective.invalid_evaluations),
             "constraint_calls": int(scalar_constraints.calls),
             "constraint_unique_evaluations": int(scalar_constraints.unique_evaluations),
@@ -712,7 +716,8 @@ def main(argv=None):
             f"final_common_grid_lap_s={final_common.lap_time_s:.9f} "
             f"delta_final_minus_start_common_s={row['delta_final_minus_start_common_s']:.9f} "
             f"minimum_track_edge_clearance_m={row['minimum_track_edge_clearance_m']:.9f} "
-            f"objective_evaluations={objective.evaluations} "
+            f"objective_evaluations_total={objective.evaluations} "
+            f"objective_evaluations_solver={solver_objective_evaluations} "
             f"invalid_objective_evaluations={objective.invalid_evaluations} "
             f"constraint_calls={scalar_constraints.calls} "
             f"constraint_unique_evaluations={scalar_constraints.unique_evaluations} "
