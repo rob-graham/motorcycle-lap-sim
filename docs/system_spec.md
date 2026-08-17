@@ -85,7 +85,7 @@ See [`direct_planar_racing_line_optimisation.md`](direct_planar_racing_line_opti
 
 ## Phase 9 - Mallala baseline, telemetry/roll validation and finite-roll sensitivity
 
-The repository now implements substantial work corresponding to the project roadmap's Phase 9, although some scripts retain historical `phase10` names from the repository development sequence. Reviewers should follow behaviour and documentation rather than infer roadmap meaning from script numbering alone.
+The repository implements the roadmap Phase 9 work, although some scripts retain historical `phase10` names from the repository development sequence. Reviewers should follow behaviour and documentation rather than infer roadmap meaning from script numbering alone.
 
 ### Frozen numerical baseline
 
@@ -124,25 +124,28 @@ Repository diagnostics support:
 
 A total lap-time match is not an acceptance criterion. Validation should examine where time is gained/lost, local speed and line agreement, transition behaviour, and active constraints.
 
-## Phase 10 - Calibration/hold-out boundary
+## Phase 10 - Calibration/hold-out closure
 
-The project roadmap reserves substantial R6 parameter calibration until after the finite-roll/telemetry discrepancy has been decomposed. The repository contains validation and sensitivity tooling, but the provisional motorcycle must not be described as a fully calibrated R6/rider model merely because selected simulations are close to measured lap time.
+The full Mallala validation/runtime chain has been reproduced on current `main`; see [`phase10_mallala_closure.md`](phase10_mallala_closure.md). The repository now records Phase 10 as closed for the present development sequence with substantial R6 parameter calibration **deferred for identifiability reasons**.
 
-If calibration work is performed it should use a small identifiable bounded parameter set, retain documented defaults, preserve calibration/hold-out separation, and report local/sector metrics. Mass, power, drag, grip/utilisation, gearing/radius corrections, edge margin, and handling response can compensate for one another and must not all be tuned freely to one lap.
+The current evidence does not justify fitting a small motorcycle parameter subset from this one incompletely characterised rider/bike/session and approximate track geometry without material compensation/overfitting risk. The provisional motorcycle must therefore not be described as calibrated merely because selected finite-roll cases approach measured lap times.
 
-The correct claim is **Mallala R6 case calibration/validation** where supported, not general validation of all riders, motorcycles, or circuits.
+The closure preserves these boundaries:
 
-## Optimisation-assurance diagnostics after the Phase 9/10 work
+- mass, power/torque, drag, grip/utilisation, gearing/radius, edge margin and handling response are not jointly tuned to the Mallala lap;
+- `max_roll_rate_radps` remains an uncalibrated sensitivity/scenario parameter;
+- Lap 5 remains the first future calibration/development candidate;
+- Lap 4 remains the first untouched hold-out candidate;
+- Laps 1-3 remain additional out-of-fit comparisons; and
+- future calibration requires new evidence that makes a deliberately small bounded parameter subset meaningfully identifiable, followed by hold-out evaluation without further fitting.
 
-The repository retains the bounded `r6_phase11a_*` multistart and
-`r6_phase11b_*` hierarchy diagnostics. They document practical
-search/warm-start limitations of the current deterministic planar optimiser.
-They are assurance checks rather than core physics and do not establish a
-globally optimal racing line. The Phase 11C latent-search experiment was
-removed after review because it expanded optimiser research without resolving
-the current Phase 9/10 validation work.
+The correct claim is **Mallala R6 case validation**, not general validation of all riders, motorcycles, or circuits.
 
-The current engineering interpretation is that poor generic-start results primarily demonstrate search convergence/basin dependence, not physical-model uncertainty. These diagnostics should remain subordinate to the primary Mallala validation objective; larger brute-force budgets or progressively more elaborate home-grown search variants are not justified merely because the local optimiser is warm-start dependent.
+## Phase 11 - Optimisation assurance and robust line generation
+
+Phase 11 is now the active roadmap phase after Phase 10 closure. The repository retains the bounded `r6_phase11a_*` multistart and `r6_phase11b_*` hierarchy diagnostics. They document practical search/warm-start limitations of the current deterministic planar optimiser. They are assurance checks rather than core physics and do not establish a globally optimal racing line.
+
+The superseded Phase 11C/11D experiments must not be revived simply because the local optimiser is warm-start dependent. Any new optimisation work requires a stated engineering need, bounded benchmark against the retained method, common-grid ranking, runtime reporting, deterministic reproduction, and meaningful regression/behavioural tests.
 
 ## Current module status
 
