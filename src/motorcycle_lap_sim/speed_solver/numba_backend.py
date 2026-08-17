@@ -137,8 +137,8 @@ def _braking(speed, curvature, p):
     high = gravity * (wheelbase - cg_from_rear) / cg_height
     for _ in range(60):
         middle = (low + high) / 2
-        front, rear, fyf, fyr = _axle(speed, curvature, -middle, mass, gravity,
-                                     wheelbase, cg_height, cg_from_rear)
+        front, rear, fyf, fyr = _axle(speed, curvature, -middle, mass, gravity, wheelbase,
+                                     cg_height, cg_from_rear)
         feasible = False
         if front >= 0 and rear >= 0:
             capacity = (_maximum_longitudinal_force(fyf, front, mu_longitudinal, mu_lateral)
@@ -167,24 +167,19 @@ def _roll_rate_speed_limits(curvature, gradient, cap, max_roll_rate, gravity,
         upper_cap = cap[index]
         if kappa_gradient == 0.0 or upper_cap == 0.0:
             continue
-
         if kappa == 0.0:
             search_upper = upper_cap
         else:
             sixty_degree_speed = sqrt(sqrt(3.0) * gravity / abs(kappa))
             search_upper = min(upper_cap, sixty_degree_speed)
-
-        upper_rate = abs(_roll_rate_demand(
-            search_upper, kappa, kappa_gradient, gravity))
+        upper_rate = abs(_roll_rate_demand(search_upper, kappa, kappa_gradient, gravity))
         if upper_rate <= max_roll_rate:
             continue
-
         lower = 0.0
         upper = search_upper
         for _ in range(bisection_iterations):
             middle = 0.5 * (lower + upper)
-            middle_rate = abs(_roll_rate_demand(
-                middle, kappa, kappa_gradient, gravity))
+            middle_rate = abs(_roll_rate_demand(middle, kappa, kappa_gradient, gravity))
             if middle_rate <= max_roll_rate:
                 lower = middle
             else:
@@ -221,6 +216,12 @@ def roll_rate_speed_limit_numba(curvature_1pm, curvature_gradient_1pm2,
         raise ValueError("roll-rate speed limits must be positive or infinity")
     limit.setflags(write=False)
     return limit
+
+
+# Compatibility hook used by the merged Phase 11 runtime profiler. Within this
+# optional backend the unqualified name intentionally denotes the accelerated
+# implementation; the authoritative Python function remains in motorcycle.roll.
+roll_rate_speed_limit_mps = roll_rate_speed_limit_numba
 
 
 @njit(cache=True, fastmath=False)
