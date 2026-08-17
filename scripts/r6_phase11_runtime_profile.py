@@ -3,7 +3,9 @@
 The diagnostic separates smooth-path geometry construction (including dense
 corridor validation and sampled-path construction) from the fixed-path speed
 solve. It also times the ordinary full candidate evaluation so the split can be
-checked against the production call path.
+checked against the production call path. When the Numba backend is selected,
+the diagnostic additionally separates its Python/setup work, compiled
+propagation kernel, and post-processing work.
 """
 
 import argparse
@@ -24,7 +26,7 @@ from motorcycle_lap_sim.optimisation import (
     planar_control_bounds,
 )
 from motorcycle_lap_sim.racing_line import build_smooth_racing_line_path
-from motorcycle_lap_sim.speed_solver import solve_speed_profile
+from motorcycle_lap_sim.speed_solver import SolverConfig, solve_speed_profile
 from motorcycle_lap_sim.track import Track
 
 
@@ -110,9 +112,173 @@ def _print_timing(label, samples):
     return summary
 
 
-def _numba_solver():
-    from motorcycle_lap_sim.speed_solver.numba_backend import solve_speed_profile_numba
-    return solve_speed_profile_numba
+def _numba_module():
+    from motorcycle_lap_sim.speed_solver import numba_backend
+    return numba_backend
+
+
+def _prepare_numba_speed(path, bike, numba_backend):
+    """Reproduce the Numba solver work before its compiled propagation kernel."""
+    count = len(path.q_m)
+    lateral = np.array([
+        numba_backend.lateral_speed_limit_mps(k, bike) for k in path.curvature_1pm
+    ])
+    power = np.full(count, numba_backend.maximum_rev_limited_speed_mps(bike))
+    gradient = numba_backend.curvature_gradient_1pm2(path)
+    handling = bike.handling
+    curvature_limit = (
+        np.full(count, np.inf)
+        if handling is None or handling.max_path_curvature_rate_1pmps is None
+        else numba_backend.curvature_transient_speed_limit_mps(
+            path, handling.max_path_curvature_rate_1pmps)
+    )
+    pre_roll_cap = np.minimum(np.minimum(lateral, power), curvature_limit)
+    roll_limit = (
+        np.full(count, np.inf)
+        if handling is None or handling.max_roll_rate_radps is None
+        else numba_backend.roll_rate_speed_limit_mps(
+            path.curvature_1pm,
+            gradient,
+            pre_roll_cap,
+            handling.max_roll_rate_radps,
+            gravity_mps2=bike.environment.gravity_mps2,
+        )
+    )
+    initial = np.minimum(pre_roll_cap, roll_limit)
+    parameters = numba_backend._parameters(bike)
+    return {
+        "lateral": lateral,
+        "power": power,
+        "gradient": gradient,
+        "curvature_limit": curvature_limit,
+        "roll_limit": roll_limit,
+        "initial": initial,
+        "parameters": parameters,
+        "curvature": np.asarray(path.curvature_1pm),
+        "segment_lengths": np.asarray(path.segment_lengths_m),
+    }
+
+
+def _propagate_numba_speed(prepared, config, numba_backend):
+    return numba_backend._propagate(
+        prepared["curvature"],
+        prepared["segment_lengths"],
+        prepared["initial"],
+        config.speed_tolerance_mps,
+        config.max_iterations,
+        prepared["parameters"],
+    )
+
+
+def _postprocess_numba_speed(path, bike, prepared, propagated, numba_backend):
+    """Reproduce the Numba solver work after its compiled propagation kernel."""
+    speed, iteration, converged = propagated
+    if not converged:
+        raise RuntimeError("profiled Numba propagation did not converge")
+    following = np.roll(speed, -1)
+    longitudinal = (
+        (following ** 2 - speed ** 2) / (2 * prepared["segment_lengths"])
+    )
+    lateral_acceleration = speed ** 2 * np.abs(path.curvature_1pm)
+    gears = np.empty(len(speed), dtype=int)
+    rpms = np.empty(len(speed))
+    parameters = prepared["parameters"]
+    for index, value in enumerate(speed):
+        gears[index], rpms[index], _ = numba_backend._best_gear(
+            value,
+            *parameters[5:6],
+            parameters[11],
+            parameters[12],
+            parameters[13],
+            parameters[14],
+            parameters[15],
+            parameters[16],
+            parameters[17],
+            parameters[18],
+        )
+    curvature_rate = speed * prepared["gradient"]
+    lean = numba_backend.demanded_lean_rad(
+        speed,
+        path.curvature_1pm,
+        gravity_mps2=bike.environment.gravity_mps2,
+    )
+    roll_rate = numba_backend.curvature_transition_roll_rate_radps(
+        speed,
+        path.curvature_1pm,
+        prepared["gradient"],
+        gravity_mps2=bike.environment.gravity_mps2,
+    )
+    arrays = [
+        speed,
+        prepared["lateral"],
+        prepared["power"],
+        prepared["gradient"],
+        curvature_rate,
+        prepared["curvature_limit"],
+        prepared["roll_limit"],
+        lean,
+        roll_rate,
+        lateral_acceleration,
+        longitudinal,
+        gears,
+        rpms,
+    ]
+    for array in arrays:
+        array.setflags(write=False)
+    return numba_backend.SpeedProfileResult(
+        path.q_m,
+        speed,
+        prepared["lateral"],
+        prepared["power"],
+        prepared["gradient"],
+        curvature_rate,
+        prepared["curvature_limit"],
+        prepared["roll_limit"],
+        lean,
+        roll_rate,
+        lateral_acceleration,
+        longitudinal,
+        gears,
+        rpms,
+        numba_backend.lap_time_seconds(path, speed),
+        iteration,
+        True,
+    )
+
+
+def _profile_numba_components(path, bike, repeats, reference_lap_time_s):
+    """Measure the Numba backend's setup, propagation and post-processing stages."""
+    numba_backend = _numba_module()
+    config = SolverConfig()
+    prepared = _prepare_numba_speed(path, bike, numba_backend)
+    propagated = _propagate_numba_speed(prepared, config, numba_backend)
+    reconstructed = _postprocess_numba_speed(
+        path, bike, prepared, propagated, numba_backend)
+    difference = abs(reconstructed.lap_time_s - reference_lap_time_s)
+    if not math.isfinite(difference) or difference > 1e-9:
+        raise RuntimeError(
+            "Numba profiling reconstruction disagrees with production solver: "
+            f"lap difference={difference:.12g} s"
+        )
+
+    _, setup_samples = _timed_samples(
+        lambda: _prepare_numba_speed(path, bike, numba_backend), repeats)
+    setup_summary = _print_timing("speed_numba_setup", setup_samples)
+
+    prepared = _prepare_numba_speed(path, bike, numba_backend)
+    _, propagation_samples = _timed_samples(
+        lambda: _propagate_numba_speed(prepared, config, numba_backend), repeats)
+    propagation_summary = _print_timing(
+        "speed_numba_propagation", propagation_samples)
+
+    propagated = _propagate_numba_speed(prepared, config, numba_backend)
+    _, post_samples = _timed_samples(
+        lambda: _postprocess_numba_speed(
+            path, bike, prepared, propagated, numba_backend),
+        repeats,
+    )
+    post_summary = _print_timing("speed_numba_postprocess", post_samples)
+    return setup_summary, propagation_summary, post_summary
 
 
 def main(argv=None):
@@ -163,12 +329,33 @@ def main(argv=None):
 
     backends = ("python", "numba") if args.speed_backend == "both" else (args.speed_backend,)
     for backend in backends:
-        solver = solve_speed_profile if backend == "python" else _numba_solver()
+        if backend == "python":
+            solver = solve_speed_profile
+        else:
+            solver = _numba_module().solve_speed_profile_numba
         # Warm the selected backend before measuring steady-state speed solves.
         warm = solver(smooth.sampled_path, bike)
         _, speed_samples = _timed_samples(
             lambda solver=solver: solver(smooth.sampled_path, bike), args.repeats)
         speed_summary = _print_timing(f"speed_{backend}", speed_samples)
+
+        if backend == "numba":
+            setup, propagation, post = _profile_numba_components(
+                smooth.sampled_path, bike, args.repeats, warm.lap_time_s)
+            component_sum = (
+                setup["median_s"] + propagation["median_s"] + post["median_s"]
+            )
+            print(f"speed_numba_component_sum_median_s={component_sum:.9f}")
+            if speed_summary["median_s"] > 0.0:
+                print(
+                    "speed_numba_setup_fraction="
+                    f"{setup['median_s'] / speed_summary['median_s']:.6f}")
+                print(
+                    "speed_numba_propagation_fraction="
+                    f"{propagation['median_s'] / speed_summary['median_s']:.6f}")
+                print(
+                    "speed_numba_postprocess_fraction="
+                    f"{post['median_s'] / speed_summary['median_s']:.6f}")
 
         # Warm the ordinary full evaluator as well. This includes backend lookup,
         # complete geometry construction and the speed solve used by optimisation.
