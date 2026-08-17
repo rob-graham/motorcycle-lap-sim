@@ -14,23 +14,27 @@ The 0.8 rad/s value remains an uncalibrated sensitivity parameter, not a measure
 
 ## Corner segmentation
 
-Corner regions are derived from demanded lean angle with hysteresis:
+Generic candidate corner regions are derived from demanded lean angle with hysteresis:
 
 - corner-on threshold: absolute lean >= 6 degrees;
 - corner-off threshold: absolute lean >= 4 degrees;
 - minimum retained corner length: 18 m; and
 - same-direction regions separated by no more than 35 m are merged.
 
-For the current Mallala case, Phase 12A fails closed unless nine corner regions are detected. This is a case-specific sanity check against the current T1-T9 reference geometry, not a generic requirement for other circuits.
+The first retained-line Mallala execution produced 12 generic lean regions rather than nine. Inspection showed that the extra regions were not unmerged compound corners: they were sustained low-curvature setup/straight-line lean regions at the lap start, before T5 and across the lap-end/start-finish transition. The nine intended T1-T9 regions were already present among the 12 candidates.
+
+For the current Mallala integration command, generic regions are therefore post-filtered against the current reference-track corner geometry. The nine reference windows are defined from the analytic primitive groups for T1-T9, with T3, T6 and T7 represented by their contiguous compound arc groups. For each reference window, the command selects the unique detected lean region with the largest positive chainage overlap. It fails closed if any T1-T9 window has no detected region or if one detected region would map to more than one reference corner.
+
+This geometry-overlap step is intentionally case-specific. It avoids introducing a generic curvature cutoff that could incorrectly reject a real fast/shallow corner such as Mallala T4, and it does not change the generic lean-hysteresis detector for other circuits. The Mallala command still fails closed unless exactly nine mapped corner regions are supplied to event extraction.
 
 ## Event rules
 
-For each detected corner the initial implementation records:
+For each accepted corner the initial implementation records:
 
 - `local_max_speed`: maximum speed between the previous corner exit and braking onset, or turn-in if no strong braking episode is detected;
 - `braking_onset`: beginning of sustained deceleration before a strong-braking sample;
 - `maximum_braking`: minimum longitudinal acceleration in the approach/corner search window;
-- `brake_release`: first recovery above the release threshold after maximum braking;
+- `brake_release`: first actual recovery above the release threshold after maximum braking; no release event is emitted merely because the search window ended;
 - `turn_in`: start of the sustained lean region after hysteresis;
 - `geometric_apex`: maximum absolute racing-line curvature within the corner region;
 - `speed_apex`: minimum speed within the corner region, retained separately when it differs from the geometric apex;
@@ -96,7 +100,7 @@ The generated Mallala event CSV and coaching image must be visually reviewed tog
 - positive-drive pickup after the speed/apex region;
 - exits on the departure side of each corner;
 - separate geometric and speed apexes where the solved trajectory supports that distinction; and
-- no obvious event duplication caused by compound analytic track primitives.
+- no obvious event duplication caused by compound analytic track primitives or straight/setup lean artefacts.
 
 If the visual review exposes bad segmentation or event rules, Phase 12A should be corrected and rerun before downstream interfaces are frozen.
 
