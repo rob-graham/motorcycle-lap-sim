@@ -4,8 +4,8 @@ The diagnostic separates smooth-path geometry construction (including dense
 corridor validation and sampled-path construction) from the fixed-path speed
 solve. It also times the ordinary full candidate evaluation so the split can be
 checked against the production call path. When the Numba backend is selected,
-the diagnostic additionally separates its Python/setup work, compiled
-propagation kernel, and post-processing work.
+the diagnostic additionally separates setup, compiled propagation, and
+post-processing, then breaks setup into its constituent speed-ceiling stages.
 """
 
 import argparse
@@ -117,24 +117,30 @@ def _numba_module():
     return numba_backend
 
 
-def _prepare_numba_speed(path, bike, numba_backend):
-    """Reproduce the Numba solver work before its compiled propagation kernel."""
-    count = len(path.q_m)
-    lateral = np.array([
+def _lateral_limits(path, bike, numba_backend):
+    return np.array([
         numba_backend.lateral_speed_limit_mps(k, bike) for k in path.curvature_1pm
     ])
-    power = np.full(count, numba_backend.maximum_rev_limited_speed_mps(bike))
-    gradient = numba_backend.curvature_gradient_1pm2(path)
+
+
+def _power_limits(path, bike, numba_backend):
+    return np.full(len(path.q_m), numba_backend.maximum_rev_limited_speed_mps(bike))
+
+
+def _curvature_limit(path, bike, numba_backend):
     handling = bike.handling
-    curvature_limit = (
-        np.full(count, np.inf)
+    return (
+        np.full(len(path.q_m), np.inf)
         if handling is None or handling.max_path_curvature_rate_1pmps is None
         else numba_backend.curvature_transient_speed_limit_mps(
             path, handling.max_path_curvature_rate_1pmps)
     )
-    pre_roll_cap = np.minimum(np.minimum(lateral, power), curvature_limit)
-    roll_limit = (
-        np.full(count, np.inf)
+
+
+def _roll_limit(path, bike, gradient, pre_roll_cap, numba_backend):
+    handling = bike.handling
+    return (
+        np.full(len(path.q_m), np.inf)
         if handling is None or handling.max_roll_rate_radps is None
         else numba_backend.roll_rate_speed_limit_mps(
             path.curvature_1pm,
@@ -144,6 +150,16 @@ def _prepare_numba_speed(path, bike, numba_backend):
             gravity_mps2=bike.environment.gravity_mps2,
         )
     )
+
+
+def _prepare_numba_speed(path, bike, numba_backend):
+    """Reproduce the Numba solver work before its compiled propagation kernel."""
+    lateral = _lateral_limits(path, bike, numba_backend)
+    power = _power_limits(path, bike, numba_backend)
+    gradient = numba_backend.curvature_gradient_1pm2(path)
+    curvature_limit = _curvature_limit(path, bike, numba_backend)
+    pre_roll_cap = np.minimum(np.minimum(lateral, power), curvature_limit)
+    roll_limit = _roll_limit(path, bike, gradient, pre_roll_cap, numba_backend)
     initial = np.minimum(pre_roll_cap, roll_limit)
     parameters = numba_backend._parameters(bike)
     return {
@@ -157,6 +173,67 @@ def _prepare_numba_speed(path, bike, numba_backend):
         "curvature": np.asarray(path.curvature_1pm),
         "segment_lengths": np.asarray(path.segment_lengths_m),
     }
+
+
+def _profile_numba_setup_components(path, bike, repeats, numba_backend):
+    """Time the independent constituents of the Numba solver's setup stage."""
+    _, lateral_samples = _timed_samples(
+        lambda: _lateral_limits(path, bike, numba_backend), repeats)
+    lateral_summary = _print_timing("speed_numba_setup_lateral", lateral_samples)
+
+    _, power_samples = _timed_samples(
+        lambda: _power_limits(path, bike, numba_backend), repeats)
+    power_summary = _print_timing("speed_numba_setup_power", power_samples)
+
+    _, gradient_samples = _timed_samples(
+        lambda: numba_backend.curvature_gradient_1pm2(path), repeats)
+    gradient_summary = _print_timing("speed_numba_setup_gradient", gradient_samples)
+
+    _, curvature_limit_samples = _timed_samples(
+        lambda: _curvature_limit(path, bike, numba_backend), repeats)
+    curvature_limit_summary = _print_timing(
+        "speed_numba_setup_curvature_limit", curvature_limit_samples)
+
+    lateral = _lateral_limits(path, bike, numba_backend)
+    power = _power_limits(path, bike, numba_backend)
+    curvature_limit = _curvature_limit(path, bike, numba_backend)
+    _, combine_samples = _timed_samples(
+        lambda: np.minimum(np.minimum(lateral, power), curvature_limit), repeats)
+    combine_summary = _print_timing("speed_numba_setup_pre_roll_combine", combine_samples)
+
+    gradient = numba_backend.curvature_gradient_1pm2(path)
+    pre_roll_cap = np.minimum(np.minimum(lateral, power), curvature_limit)
+    _, roll_samples = _timed_samples(
+        lambda: _roll_limit(path, bike, gradient, pre_roll_cap, numba_backend), repeats)
+    roll_summary = _print_timing("speed_numba_setup_roll_limit", roll_samples)
+
+    roll_limit = _roll_limit(path, bike, gradient, pre_roll_cap, numba_backend)
+    _, initial_samples = _timed_samples(
+        lambda: np.minimum(pre_roll_cap, roll_limit), repeats)
+    initial_summary = _print_timing("speed_numba_setup_initial_combine", initial_samples)
+
+    _, parameter_samples = _timed_samples(
+        lambda: numba_backend._parameters(bike), repeats)
+    parameter_summary = _print_timing("speed_numba_setup_parameters", parameter_samples)
+
+    _, segment_samples = _timed_samples(
+        lambda: np.asarray(path.segment_lengths_m), repeats)
+    segment_summary = _print_timing("speed_numba_setup_segment_lengths", segment_samples)
+
+    summaries = (
+        lateral_summary,
+        power_summary,
+        gradient_summary,
+        curvature_limit_summary,
+        combine_summary,
+        roll_summary,
+        initial_summary,
+        parameter_summary,
+        segment_summary,
+    )
+    component_sum = sum(summary["median_s"] for summary in summaries)
+    print(f"speed_numba_setup_component_sum_median_s={component_sum:.9f}")
+    return summaries
 
 
 def _propagate_numba_speed(prepared, config, numba_backend):
@@ -264,6 +341,7 @@ def _profile_numba_components(path, bike, repeats, reference_lap_time_s):
     _, setup_samples = _timed_samples(
         lambda: _prepare_numba_speed(path, bike, numba_backend), repeats)
     setup_summary = _print_timing("speed_numba_setup", setup_samples)
+    _profile_numba_setup_components(path, bike, repeats, numba_backend)
 
     prepared = _prepare_numba_speed(path, bike, numba_backend)
     _, propagation_samples = _timed_samples(
@@ -307,8 +385,6 @@ def main(argv=None):
         boundary_check_spacing_m=args.boundary_check_spacing_m,
     )
 
-    # One untimed construction confirms feasibility and provides the fixed path
-    # used for speed-only timing. Repeated geometry timings rebuild everything.
     smooth = geometry()
     print(f"controls_csv={args.controls_csv}")
     print(f"controls_sha256={phase9.sha256_file(args.controls_csv)}")
@@ -329,11 +405,7 @@ def main(argv=None):
 
     backends = ("python", "numba") if args.speed_backend == "both" else (args.speed_backend,)
     for backend in backends:
-        if backend == "python":
-            solver = solve_speed_profile
-        else:
-            solver = _numba_module().solve_speed_profile_numba
-        # Warm the selected backend before measuring steady-state speed solves.
+        solver = solve_speed_profile if backend == "python" else _numba_module().solve_speed_profile_numba
         warm = solver(smooth.sampled_path, bike)
         _, speed_samples = _timed_samples(
             lambda solver=solver: solver(smooth.sampled_path, bike), args.repeats)
@@ -357,8 +429,6 @@ def main(argv=None):
                     "speed_numba_postprocess_fraction="
                     f"{post['median_s'] / speed_summary['median_s']:.6f}")
 
-        # Warm the ordinary full evaluator as well. This includes backend lookup,
-        # complete geometry construction and the speed solve used by optimisation.
         warm_full = evaluate_planar_racing_line(
             controls, track, bike, stations,
             sample_spacing_m=args.sample_spacing_m,
