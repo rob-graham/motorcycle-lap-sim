@@ -71,6 +71,26 @@ def _positive_int(text):
     return value
 
 
+def margin_controls_filename(margin_m):
+    """Return the deliberately three-decimal margin controls filename."""
+    return f"margin_{float(margin_m):.3f}m_final_controls.csv"
+
+
+def require_unique_margin_control_filenames(margins):
+    """Fail closed when distinct exact margins collide after filename formatting."""
+    seen = {}
+    for margin in margins:
+        margin = float(margin)
+        filename = margin_controls_filename(margin)
+        if filename in seen and seen[filename] != margin:
+            raise ValueError(
+                f"margin values {seen[filename]!r} and {margin!r} map to the same "
+                f"controls filename {filename!r}; choose margins distinguishable at "
+                "0.001 m filename precision"
+            )
+        seen[filename] = margin
+
+
 def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("reviewed_reference_controls_csv", type=Path)
@@ -150,6 +170,7 @@ def main(argv=None):
     margins = tuple(sorted(set(float(value) for value in args.margins_m)))
     if not margins:
         raise ValueError("at least one margin is required")
+    require_unique_margin_control_filenames(margins)
 
     track = Track.from_yaml(phase9.DEFAULT_TRACK)
     base_bike = load_motorcycle_config(phase9.DEFAULT_MOTORCYCLE)
@@ -225,7 +246,7 @@ def main(argv=None):
                       args.common_spacing_m, margin, args.boundary_check_spacing_m),
             f"margin {margin:.3f} m final line on common grid",
         )
-        output_controls = args.output_dir / f"margin_{margin:.3f}m_final_controls.csv"
+        output_controls = args.output_dir / margin_controls_filename(margin)
         phase8.atomic_write_controls_csv(
             output_controls, result.control_s_m, result.best_controls_m,
             result.lower_bounds_m, result.upper_bounds_m)
