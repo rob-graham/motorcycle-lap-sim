@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -57,3 +58,15 @@ def test_compact_discards_heavy_candidate_results():
     assert compact.lap_time_s == 71.25
     assert compact.smooth_line is None
     assert compact.speed_profile is None
+
+
+def test_guide_point_uses_singular_stored_offset_field(monkeypatch):
+    sampled = SimpleNamespace(
+        x_m=np.array([10.0]), y_m=np.array([20.0]),
+        normal_x=np.array([0.0]), normal_y=np.array([1.0]))
+    monkeypatch.setattr(module, "sample_track_stations", lambda track, stations: sampled)
+    smooth_line = SimpleNamespace(guide_offset_m=np.array([1.5, -2.0]))
+
+    point = module._guide_point(object(), smooth_line, 1, 40.0)
+
+    assert point == (10.0, 18.0)
