@@ -173,6 +173,22 @@ def detect_corner_regions(columns, config=EventDetectionConfig()):
         regions, path_q, lean, config.merge_same_direction_gap_m)
 
 
+def _validated_corner_regions(regions, count):
+    validated = []
+    previous_end = -1
+    for region in regions:
+        if len(region) != 2:
+            raise ValueError("corner regions must be (start_index, end_index) pairs")
+        start, end = int(region[0]), int(region[1])
+        if start < 0 or end < start or end >= count:
+            raise ValueError("corner region indices are outside the solved trajectory")
+        if start <= previous_end:
+            raise ValueError("corner regions must be ordered and non-overlapping")
+        validated.append((start, end))
+        previous_end = end
+    return validated
+
+
 def _event(arrays, index, corner, event_type, source_rule, confidence, *, display=True):
     gear_values = arrays.get("gear")
     rpm_values = arrays.get("rpm")
@@ -227,8 +243,10 @@ def _braking_indices(acceleration, search_start, search_end, config):
     while onset < strong and acceleration[onset] > config.brake_onset_mps2:
         onset += 1
     release = strong
-    while release < search_end and acceleration[release] < config.brake_release_mps2:
+    while release <= search_end and acceleration[release] < config.brake_release_mps2:
         release += 1
+    if release > search_end:
+        release = None
     return onset, strong, release
 
 
@@ -247,14 +265,21 @@ def _first_sustained_positive_drive(acceleration, path_q, start, end, threshold,
     return None
 
 
-def extract_coaching_events(columns, config=EventDetectionConfig(), *, expected_corner_count=None):
+def extract_coaching_events(
+        columns, config=EventDetectionConfig(), *, corner_regions=None,
+        expected_corner_count=None):
     """Extract ordered rider-facing landmarks from a solved representative lap.
 
     Detection is deliberately rule based and deterministic.  The result is a
     set of coaching landmarks for visual review, not a safety prescription.
+    A caller may supply already-reviewed corner regions when a case-specific
+    track segmentation rule is more appropriate than the generic lean detector.
     """
     arrays, count = _arrays(columns)
-    regions = detect_corner_regions(arrays, config)
+    if corner_regions is None:
+        regions = detect_corner_regions(arrays, config)
+    else:
+        regions = _validated_corner_regions(corner_regions, count)
     if expected_corner_count is not None and len(regions) != expected_corner_count:
         raise ValueError(
             f"detected {len(regions)} corner regions; expected {expected_corner_count}")
@@ -289,9 +314,11 @@ def extract_coaching_events(columns, config=EventDetectionConfig(), *, expected_
                 arrays, max_braking, corner, "maximum_braking",
                 "minimum longitudinal acceleration in the approach/corner window", "high",
                 display=False))
-            events.append(_event(
-                arrays, brake_release, corner, "brake_release",
-                "first recovery above the brake-release threshold after maximum braking", "medium"))
+            if brake_release is not None:
+                events.append(_event(
+                    arrays, brake_release, corner, "brake_release",
+                    "first recovery above the brake-release threshold after maximum braking",
+                    "medium"))
         else:
             max_speed = previous_exit + int(np.argmax(speed[previous_exit:start + 1]))
             events.append(_event(
