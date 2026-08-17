@@ -19,7 +19,11 @@ from pathlib import Path
 
 import numpy as np
 
-from motorcycle_lap_sim.coaching import EventDetectionConfig, extract_coaching_events
+from motorcycle_lap_sim.coaching import (
+    EventDetectionConfig,
+    detect_corner_regions,
+    extract_coaching_events,
+)
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
 from motorcycle_lap_sim.optimisation import (
     REFERENCE_PLANAR_CONTROL_POLICY,
@@ -39,6 +43,22 @@ DEFAULT_EXPECTED_LAP_S = 71.396583646
 DEFAULT_LAP_TOLERANCE_S = 2e-6
 DEFAULT_PLOT_DPI = 400
 EXPECTED_MALLALA_CORNERS = 9
+
+# Groups of analytic reference-track primitives that represent Mallala T1-T9.
+# T3, T6 and T7 are compound same-direction bends in the current approximate
+# reference geometry.  This case-specific mapping is used only to reject
+# straight/setup lean artefacts after the generic lean-hysteresis detector.
+MALLALA_CORNER_PRIMITIVE_GROUPS = (
+    (1,),
+    (3,),
+    (5, 6, 7),
+    (9,),
+    (11,),
+    (13, 14),
+    (16, 17),
+    (19,),
+    (21,),
+)
 
 EVENT_FIELDS = (
     "corner", "event_type", "sample_index", "track_s_m", "path_q_m", "x_m", "y_m",
@@ -115,6 +135,67 @@ def build_parser():
                         default=DEFAULT_LAP_TOLERANCE_S)
     parser.add_argument("--plot-dpi", type=int, default=DEFAULT_PLOT_DPI)
     return parser
+
+
+def _mallala_corner_windows(track):
+    starts = np.asarray(track.primitive_start_s_m, dtype=float)
+    windows = []
+    for group in MALLALA_CORNER_PRIMITIVE_GROUPS:
+        first = min(group)
+        last = max(group)
+        if tuple(range(first, last + 1)) != tuple(group):
+            raise RuntimeError("Mallala corner primitive groups must be contiguous")
+        if first < 0 or last >= len(track.primitives):
+            raise RuntimeError("Mallala corner primitive group is outside the reference track")
+        windows.append((float(starts[first]), float(starts[last + 1])))
+    return tuple(windows)
+
+
+def _interval_overlap_m(start_a, end_a, start_b, end_b):
+    return max(0.0, min(end_a, end_b) - max(start_a, start_b))
+
+
+def _select_mallala_corner_regions(track, columns, raw_regions):
+    """Map generic lean regions one-to-one onto the nine Mallala corner windows.
+
+    The generic detector can legitimately report sustained lean on a straight
+    because the optimised racing line may curve slightly while setting up for a
+    bend.  For this Mallala integration case, retain only the unique detected
+    region having the largest positive chainage overlap with each T1-T9
+    reference-geometry window.  Fail closed if the mapping is not one-to-one.
+    """
+    track_s = np.asarray(columns["track_s_m"], dtype=float)
+    windows = _mallala_corner_windows(track)
+    selected = []
+    used = set()
+    diagnostics = []
+
+    for corner_number, (window_start, window_end) in enumerate(windows, start=1):
+        candidates = []
+        for raw_index, (start, end) in enumerate(raw_regions):
+            region_start = float(track_s[start])
+            region_end = float(track_s[end])
+            overlap = _interval_overlap_m(
+                region_start, region_end, window_start, window_end)
+            if overlap > 0.0:
+                candidates.append((overlap, raw_index, start, end))
+        candidates.sort(reverse=True)
+        if not candidates:
+            raise ValueError(
+                f"no detected lean region overlaps Mallala T{corner_number} "
+                f"reference window {window_start:.3f}:{window_end:.3f} m")
+        overlap, raw_index, start, end = candidates[0]
+        if raw_index in used:
+            raise ValueError(
+                f"detected lean region {raw_index + 1} maps to more than one Mallala corner")
+        used.add(raw_index)
+        selected.append((start, end))
+        diagnostics.append((corner_number, raw_index + 1, overlap, window_start, window_end))
+
+    if len(selected) != EXPECTED_MALLALA_CORNERS:
+        raise ValueError(
+            f"mapped {len(selected)} Mallala corner regions; expected {EXPECTED_MALLALA_CORNERS}")
+    return tuple(selected), tuple(diagnostics)
 
 
 def _write_events_csv(path, events):
@@ -257,8 +338,12 @@ def main(argv=None):
     columns = trajectory.trajectory_columns(
         track, evaluation.smooth_line, evaluation.speed_profile, bike)
     config = EventDetectionConfig()
+    raw_regions = detect_corner_regions(columns, config)
+    corner_regions, corner_mapping = _select_mallala_corner_regions(
+        track, columns, raw_regions)
     events = extract_coaching_events(
-        columns, config, expected_corner_count=EXPECTED_MALLALA_CORNERS)
+        columns, config, corner_regions=corner_regions,
+        expected_corner_count=EXPECTED_MALLALA_CORNERS)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trajectory_csv = args.output_dir / "phase12a_representative_trajectory.csv"
@@ -292,7 +377,12 @@ def main(argv=None):
     print("speed_backend=python")
     print(f"lap_s={evaluation.lap_time_s:.9f}")
     print(f"lap_delta_from_phase11_reference_s={lap_delta:+.9f}")
+    print(f"raw_lean_region_count={len(raw_regions)}")
     print(f"corner_count={counts['turn_in']}")
+    for corner_number, raw_number, overlap, window_start, window_end in corner_mapping:
+        print(
+            f"corner_mapping_T{corner_number}=raw_region_{raw_number} "
+            f"overlap_m={overlap:.6f} reference_window_m={window_start:.3f}:{window_end:.3f}")
     for event_type, count in counts.items():
         print(f"event_count_{event_type}={count}")
     print(f"trajectory_csv={trajectory_csv}")
@@ -300,7 +390,13 @@ def main(argv=None):
     print(f"coaching_racing_line_png={coaching_png}")
     print("visual_review_required=true")
     print("runoff_export_contract_status=deferred_until_after_visual_event_review")
-    return {"evaluation": evaluation, "columns": columns, "events": events}
+    return {
+        "evaluation": evaluation,
+        "columns": columns,
+        "raw_regions": raw_regions,
+        "corner_regions": corner_regions,
+        "events": events,
+    }
 
 
 if __name__ == "__main__":
