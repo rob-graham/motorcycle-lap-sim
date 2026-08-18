@@ -33,7 +33,8 @@
 - Use one focused branch/PR per task. Do not continue development on stale, superseded, or rejected PR branches.
 - Every task must explicitly name one Implementer and one independent Reviewer. Either ChatGPT or Codex may fill either role, but the same participant must not fill both roles for a non-trivial change.
 - Use one active Implementer per task branch. Reviewers inspect and comment; they do not make competing edits unless the Owner explicitly transfers the Implementer role.
-- For cloud or sandbox agents, the supplied starting commit SHA is the authoritative task identity. The sandbox's internal branch name need not match the GitHub branch name.
+- For Local implementation, the Owner normally creates and pushes the named task branch before implementation. For Cloud/sandbox implementation, the Owner supplies the repository, base branch/ref, authoritative starting commit SHA, task identity, Implementer, and Reviewer; the service may create the eventual GitHub PR head branch, whose name need not match an internal sandbox branch or a pre-created Owner branch.
+- Once a PR exists, record its actual GitHub head branch and exact head SHA. Those identities govern review and merge. The Reviewer must state the exact PR head SHA reviewed, and any later head change requires re-review.
 - If an old branch contains a potentially useful fix, first reproduce the failure on current `main`; then re-propose the smallest fix against current `main` with a regression test.
 - ChatGPT and Codex may implement code and documentation. When ChatGPT has connected GitHub access, it should inspect the actual repository, pull request, and diff directly; pasted diffs and logs are fallback evidence.
 - Review the actual diff and executable behaviour, not only the implementer's explanation. Do not assume a generated change is correct because its unit tests pass.
@@ -44,12 +45,14 @@
 ## Verification before merge
 
 - A code change is not complete while it has a known runtime error, even if unit tests pass.
+- Assess the static/change, targeted, representative runtime, and full regression gates independently. A gate may be recorded as N/A only when the change cannot affect that category, with the reason stated; never infer N/A from another gate passing.
 - Run targeted tests for the changed behaviour and run the full test suite with `python -m pytest` before merge. Report the exact pass/fail/skip result; do not hide optional-dependency skips.
 - If a change affects a command-line script, long-running workflow, import path, file-loading path, or user-facing runtime path, execute the affected entry point on the smallest representative case available. Unit tests alone are not sufficient runtime verification.
 - For changes affecting the frozen Mallala baseline, its inputs, or baseline provenance, run `python scripts/r6_phase9_baseline_check.py` and require the fail-closed regression checks to pass.
 - For long optimisation workflows, use a bounded smoke/diagnostic run when a full optimisation is unnecessary. Record settings, termination reason, and any warnings.
 - If required proprietary/external data are unavailable in the execution environment, say so explicitly. Use synthetic or repository-contained smoke coverage where possible, and do not claim the unavailable end-to-end path was runtime-validated.
 - Do not weaken tolerances, disable checks, catch-and-ignore exceptions, or convert failures into warnings merely to obtain a green test run.
+- Immediately before merge, the Owner must verify that the locally tested `HEAD` and the GitHub PR head both equal the exact head SHA stated in the final review.
 
 ## Pull-request evidence and review
 
