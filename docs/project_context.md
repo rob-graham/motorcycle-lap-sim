@@ -1,188 +1,139 @@
 # Simulation project context and source hierarchy
 
-**Status date:** 2026-08-17  
+**Status date:** 2026-08-18  
 **Repository:** `rob-graham/motorcycle-lap-sim`
 
 This document brings the simulation-relevant project context from the external project index and roadmap into the repository so that code and pull-request reviews do not depend on chat history or separately supplied files.
 
-It is derived from:
-
-- `PROJECT_INDEX_v1.1.md` (project index version 1.1, status 2026-08-16); and
-- `motorcycle_racing_line_project_approach_v2.1.md` (authoritative project approach version 2.1, status 2026-08-16).
-
-The repository remains the source of truth for **implemented behaviour**. This document records project direction, evidence hierarchy, modelling boundaries, and the intended relationship between the simulator and the wider track-layout project.
+It is derived from `PROJECT_INDEX_v1.1.md` and `motorcycle_racing_line_project_approach_v2.1.md`. The repository remains the source of truth for implemented behaviour; the roadmap remains the source of truth for project direction.
 
 ## 1. Source hierarchy
 
 When sources overlap, use the following order for simulation work:
 
-1. **Current project direction and development decisions:** `motorcycle_racing_line_project_approach_v2.1.md`.
-2. **Implemented simulator behaviour:** current repository code, tests, configuration, cases, and documentation.
-3. **Measured Mallala validation data:** `R6 Mallala P4.xlsx`.
-4. **Published standards/reference documents:** supplied Motorcycling Australia road-race track standards, subject to separate verification of current applicability.
-5. **Published technical precedent:** the supplied Wanneroo safety assessment, as precedent rather than governing authority.
-6. **Internal run-off calculations:** provisional working material, not accepted external criteria.
+1. current project direction and development decisions: `motorcycle_racing_line_project_approach_v2.1.md`;
+2. implemented simulator behaviour: current repository code, tests, configuration, cases, and documentation;
+3. measured Mallala validation data: `R6 Mallala P4.xlsx`;
+4. supplied published standards/reference documents, subject to separate verification of current applicability;
+5. published technical precedent such as the supplied Wanneroo safety assessment; and
+6. internal run-off calculations, which remain provisional working material rather than accepted external criteria.
 
 The roadmap says where the software should go; this repository says what it actually does.
 
-## 2. Project purpose and constraints relevant to this repository
+## 2. Project purpose and constraints
 
 The simulator is being developed as part of a motorcycle track-layout and safety-design workflow. The immediate objective is to develop, test, document, and internally review a technically defensible method before approaching Motorcycling Australia, insurers, certifiers, or other agencies.
 
-Important project constraints are:
+Important constraints are:
 
-- SI units are used internally.
-- Important default parameters may be used during development, but must be explicit, versioned, traceable, and replaceable.
-- Mallala and the available R6 telemetry are the first validation case.
-- The R6 motorcycle, rider, logger installation, and session are incompletely characterised; results are therefore case-specific and provisional.
-- Measured telemetry is validation evidence, not an optimisation target to be fitted blindly.
-- A total lap-time match is not sufficient validation. Local speed, trajectory, acceleration, braking, lean/roll transition, gear/RPM, and spatial consistency matter.
-- The simulator should remain a minimum-time / high-performance scenario model, not a predictor of one particular rider.
-- No repository output currently claims regulatory approval, homologation, certification, or insurance acceptance.
+- SI units are used internally;
+- defaults may be used during development but must remain explicit, versioned, traceable, and replaceable;
+- Mallala and the available R6 telemetry are the first validation case;
+- the R6 motorcycle, rider, logger installation, and session are incompletely characterised;
+- measured telemetry is validation evidence, not an optimisation target to be fitted blindly;
+- total lap-time agreement is not sufficient validation by itself;
+- the simulator remains a minimum-time / high-performance scenario model, not a predictor of one particular rider; and
+- no repository output claims regulatory approval, homologation, certification, or insurance acceptance.
 
 ## 3. Architecture boundary
 
-The simulation work should preserve the existing modular separation of:
+Preserve the modular separation of track geometry and boundaries, racing-line/path geometry, motorcycle configuration and limits, fixed-path speed solution, racing-line optimisation, telemetry/validation, coaching/event extraction, and plotting/diagnostics.
 
-- track geometry and boundaries;
-- racing-line/path geometry;
-- motorcycle configuration and physical limits;
-- fixed-path minimum-time speed solution;
-- racing-line optimisation;
-- telemetry import, registration, map matching, and validation;
-- coaching/event extraction; and
-- plotting and diagnostics.
+Measured data must not become a hidden dependency of the physics solver. Coaching/event extraction consumes solved state and does not alter physics or optimisation.
 
-Measured data must not become a hidden dependency of the physics solver. Coaching/event extraction consumes solved trajectory state; it does not alter the physics or optimiser.
+The wider project also contains future workstreams for three-dimensional track-surface/LiDAR processing, GIS export, and run-off calculations. The run-off calculation remains a separate package. With Phase 12A now reviewed and closed, the simulator-to-run-off contract is the next active interface-development task.
 
-The wider project also contains separate future workstreams for three-dimensional track-surface/LiDAR processing, GIS export, and run-off calculations. The run-off calculation remains intended as a separate package. Its simulator input contract is intentionally not frozen until Phase 12A event locations have been reviewed around Mallala.
-
-## 4. Roadmap phases relevant to the simulator
+## 4. Closed simulator phases
 
 ### Phase 9 - Baseline freeze, Mallala telemetry validation and initial roll-response model
 
-The project approach defines Phase 9 as the Mallala physics/validation milestone used to understand the approximately 1:09 ideal-response simulation versus approximately 1:12 measured R6 laps before materially calibrating uncertain motorcycle parameters.
+Phase 9 established the reproducible Mallala numerical baseline, telemetry ingestion/map matching, Level-1 demanded-lean / roll-rate sensitivity, fixed-line roll sensitivity, roll-aware re-optimisation, and spatial discrepancy decomposition.
 
-The implemented sequence covers baseline freeze, telemetry ingestion/map matching, roll-channel assessment, a Level-1 demanded-lean / roll-rate model, fixed-line roll sensitivity, roll-aware re-optimisation, and spatial discrepancy decomposition.
-
-The Level-1 planar demand is based on steady lean
-
-`phi_d = atan(v^2 * kappa / g)`
-
-with a trajectory-driven roll-rate demand. The implemented production sensitivity constraint presently uses the curvature-transition component of demanded roll rate. It is deliberately a simple Level-1 model, not a full steering/rider dynamics model. The constant `max_roll_rate_radps` is a replaceable scenario parameter, not an identified R6/rider constant.
-
-A more complex dynamic lean/roll model is explicitly deferred unless the simpler model leaves a systematic, decision-relevant discrepancy that suitable telemetry can identify.
+The implemented production finite-roll sensitivity uses the curvature-transition component of demanded roll rate. `max_roll_rate_radps` is a replaceable scenario parameter, not an identified R6/rider constant.
 
 ### Phase 10 - Mallala parameter calibration and hold-out validation
 
-The full Mallala runtime chain has been exercised on current `main` and the result is recorded in [`phase10_mallala_closure.md`](phase10_mallala_closure.md). The engineering decision is to close Phase 10 for the present sequence with **substantial parameter calibration deferred for identifiability reasons**.
+Phase 10 is closed for the present sequence; see [`phase10_mallala_closure.md`](phase10_mallala_closure.md). Substantial R6 parameter calibration is deferred for identifiability reasons. The current R6 model remains provisional, and defaults are not changed merely to force lap-time agreement.
 
-The current evidence shows that the frozen ideal-response case is reproducible, the measured-versus-model discrepancy is real and spatially structured, and finite-roll sensitivity explains a substantial physically plausible portion of that discrepancy without changing motorcycle performance parameters. The remaining difference cannot be uniquely assigned to mass, power, drag, grip/utilisation, gearing/radius, rider edge margin, roll response, approximate track geometry, or telemetry uncertainty strongly enough to justify fitting a bounded parameter subset from this one session.
-
-Accordingly:
-
-- the R6 reference model remains provisional rather than calibrated;
-- `max_roll_rate_radps` remains a sensitivity/scenario parameter rather than an identified constant;
-- defaults are not changed merely to force total lap-time agreement;
-- Lap 5 remains the first future calibration/development candidate;
-- Lap 4 remains the first untouched hold-out candidate; and
-- Laps 1-3 remain additional out-of-fit comparisons.
-
-The correct classification remains **Mallala R6 case validation**, not general motorcycle or track validation.
+Lap 5 remains the first future calibration/development candidate, Lap 4 the first untouched hold-out candidate, and Laps 1-3 additional out-of-fit comparisons.
 
 ### Phase 11 - Optimisation assurance and representative line
 
-Phase 11 is closed for the present Mallala sequence; see [`phase11_optimisation_assurance_closure.md`](phase11_optimisation_assurance_closure.md).
+Phase 11 is closed; see [`phase11_optimisation_assurance_closure.md`](phase11_optimisation_assurance_closure.md).
 
-The closure used bounded multistart/control-basis/station-relocation evidence and a final common-grid representative-line diagnostic. Four retained candidate lines were re-evaluated at 0.125 m with the authoritative Python backend, 0.250 m margin and 0.8 rad/s finite-roll sensitivity.
+The retained representative is `reduced_reoptimised_51` at `71.396583646 s`, evaluated on the 0.125 m authoritative Python common grid with 0.250 m margin and 0.8 rad/s finite-roll sensitivity. It is an optimisation-assured feasible local solution for the present engineering task, not a global-optimality claim.
 
-The final retained representative is `reduced_reoptimised_51` at 71.396583646 s. The eligible geometric medoid was rejected by the explicit 0.050 s representative lap-time guardrail, causing the selection rule to fall back to the fastest eligible line. The retained line is feasible and optimisation-assured for the present engineering task, but this is not a global-optimality claim.
-
-The optimiser/control-basis spread remains numerical sensitivity. It is not a physical uncertainty interval, rider-variability envelope, run-off corridor, or regulatory criterion.
-
-No further optimiser run is required before Phase 12A unless a later result identifies a specific engineering need. Superseded Phase 11C/11D experiments must not be revived merely because the optimiser is warm-start dependent.
+The optimiser/control-basis spread is numerical sensitivity, not a rider-variability envelope, physical uncertainty interval, run-off corridor, or regulatory criterion.
 
 ### Phase 12A - Coaching-event extraction and visual review
 
-Phase 12A is the current active development task.
+Phase 12A is closed for the present Mallala engineering sequence; see [`phase12a_coaching_event_closure.md`](phase12a_coaching_event_closure.md) and [`coaching_event_definitions.md`](coaching_event_definitions.md).
 
-It uses the retained Phase 11 representative controls, reproduces the line on the authoritative scenario/grid, extracts deterministic rider-facing landmarks, writes a machine-readable event table, and adds the coaching marks to a clean racing-line image.
+The final target-machine acceptance run reproduced the retained Phase 11 line exactly at `71.396583646 s`, retained the generic 12 raw lean regions, consolidated them to nine Mallala nominal corners, and generated the clean rider overview, speed map, regional engineering detail plots, event/provenance CSVs, and longitudinal limit-state diagnostic.
 
-The first map includes rider-facing marks for:
+The accepted rider-facing vocabulary is BRK, TURN, APEX, DRIVE, and EXIT. Engineering-only information includes MAX-BRK, REL, VMIN, K-MAX, maximum lean, roll transitions, gear shifts, trail-braking proxy, and model capability limit states.
 
-- braking onset;
-- brake release;
-- turn-in;
-- geometric apex;
-- positive-drive/throttle pickup; and
-- corner exit.
+Important closure caveats are:
 
-Additional event-table information includes local maximum speed, maximum braking, speed apex, maximum lean, gear shifts and roll-transition landmarks. Every event carries its source rule and a confidence/quality flag.
+- these are prototype engineering/model-derived events, not validated rider instruction or measured controls;
+- DRIVE is not throttle position and REL is not measured brake-lever release;
+- trail braking is a simulation-derived proxy;
+- wheelie/stoppie/traction/power classifications are model capability diagnostics;
+- rider-facing use would benefit from review by several experienced riders; and
+- the retained Phase 11 trajectory is an engineering simulation path, **not a recommended riding line**.
 
-The coaching image deliberately excludes optimiser control points, optimiser/control-basis spread, margin-corridor lines, centreline diagnostics and convergence information. It is intended to show rider information rather than optimisation diagnostics.
+In particular, the retained closed-loop line bends toward the centre of the start/finish straight. That is a known modelling/optimisation artefact and must not be presented to riders as the recommended line. It does not block the run-off calculation work.
 
-See [`coaching_event_definitions.md`](coaching_event_definitions.md).
+## 5. Current active task - simulator-to-run-off interface and departure conditions
 
-Phase 12A is not closed until the generated event locations have been visually inspected around Mallala. The simulator-to-run-off export contract must not be defined before that review.
+Phase 12A's visual gate has been passed, so the next bounded task is to define and test the versioned simulator-to-run-off calculation contract.
 
-### Later simulation-facing phases
+The interface should be driven by the separate run-off package's engineering needs rather than by rider-facing presentation. It should decide which solved trajectory fields, reviewed events, provenance/confidence values, coordinate conventions, scenario metadata, and candidate departure-point / departure-condition seeds are transferred downstream.
 
-The roadmap subsequently proposes:
+At minimum, the work should consider:
 
-- optional advanced roll dynamics only if evidence requires it;
-- a reusable `TrackSurface` / `z(s,n)` LiDAR/DEM interface;
-- three-dimensional lap simulation with grade and banking;
-- georeferenced GIS output; and
-- a separate run-off package consuming a versioned simulator result contract designed after Phase 12A review.
+- path and track chainage conventions;
+- local/global coordinates and track-boundary geometry;
+- speed and longitudinal/lateral acceleration;
+- path curvature and demanded lean/roll state where relevant;
+- gear/RPM only where it provides downstream value;
+- reviewed corner/event provenance and confidence;
+- model capability / limit-state flags where useful;
+- scenario/model/configuration identity; and
+- explicit separation between simulator results and run-off calculation assumptions.
 
-These remain future interfaces, not current capability claims unless repository code and tests say otherwise.
+The run-off contract must not silently convert coaching marks into safety criteria. Departure seeds should be derived and justified for run-off analysis, with coaching events used only where they provide a useful, traceable starting point.
 
-## 5. Current repository status relevant to review
+## 6. Current repository status relevant to review
 
-As of the status date, the repository includes:
+The repository includes:
 
-- a frozen Mallala 52-control numerical baseline and executable regression check;
-- telemetry import/quality tooling, rigid registration, map matching, peer/repeatability diagnostics, and speed-comparison utilities;
-- a Level-1 demanded-lean/roll-rate implementation and optional finite-roll speed constraint;
-- fixed-line finite-roll sensitivity and roll-aware racing-line re-optimisation scripts;
-- sector/spatial diagnostics for comparing ideal, finite-roll, and measured behaviour;
-- trajectory export with speed, accelerations, lean, roll demand/ceiling, limits, gear and RPM;
-- an explicit Phase 10 closure record preserving the runtime validation evidence and calibration-deferral decision;
-- completed Phase 11 representative-line / optimiser-spread assurance, retaining `reduced_reoptimised_51`; and
-- Phase 12A coaching-event extraction code and rider-facing map generation, pending end-to-end Mallala execution and visual review.
+- a frozen Mallala baseline and executable regression check;
+- telemetry ingestion, registration, map matching, repeatability and comparison tools;
+- Level-1 demanded-lean/roll-rate sensitivity and optional finite-roll speed constraint;
+- fixed-line and re-optimised roll-sensitive comparisons;
+- explicit Phase 10 closure with calibration deferral;
+- completed Phase 11 representative-line assurance retaining `reduced_reoptimised_51`;
+- closed Phase 12A deterministic coaching/event extraction with reviewed visual outputs; and
+- engineering limit-state and trail-braking-proxy diagnostics suitable for downstream interpretation with their documented caveats.
 
-Detailed numerical baseline provenance is in [`phase9_baseline_freeze.md`](phase9_baseline_freeze.md). Telemetry source-quality findings are in [`mallala_r6_telemetry_integrity.md`](mallala_r6_telemetry_integrity.md). Phase 10 closure evidence is in [`phase10_mallala_closure.md`](phase10_mallala_closure.md). Phase 11 closure evidence is in [`phase11_optimisation_assurance_closure.md`](phase11_optimisation_assurance_closure.md). The coaching rules are in [`coaching_event_definitions.md`](coaching_event_definitions.md). The implemented architecture is summarised in [`system_spec.md`](system_spec.md).
+## 7. Evidence and interpretation boundaries
 
-## 6. Current evidence and interpretation boundaries
+Retain these distinctions:
 
-For review, retain these distinctions:
+- the frozen ideal-response result is a numerical/software baseline, not proof of physical accuracy;
+- the approximate Mallala track is not survey-grade and must not be rescaled to force telemetry agreement;
+- the provisional R6 configuration is not a fully identified motorcycle/rider model;
+- 0.8 rad/s remains a finite-roll sensitivity scenario, not a calibrated constant;
+- optimiser/control-basis spread is numerical search sensitivity, not physical uncertainty;
+- measured rider trajectory/speed are validation evidence rather than an optimiser target;
+- coaching marks are model-derived references rather than universally safe markers; and
+- the retained representative path is an engineering analysis trajectory rather than a recommended rider line.
 
-- The frozen ideal-response Mallala result is a numerical/software baseline, not proof of physical accuracy.
-- The approximate Mallala track is adequate for present development comparison but is not survey-grade and must not be silently rescaled to force telemetry agreement.
-- The provisional R6 configuration is not a fully identified motorcycle/rider model.
-- Finite roll response is a sensitivity/model-development feature. A value such as `0.8 rad/s` must be labelled provisional/uncalibrated unless separately supported by evidence.
-- Re-optimising with roll active may improve minimum calculated lap time without improving agreement with a particular measured rider line; this is not automatically a failure of the minimum-time model.
-- Optimiser/control-basis spread is evidence about numerical search sensitivity and must not be presented as physical model uncertainty.
-- The measured rider trajectory and speed are evidence for validation and plausibility, not a target that the optimiser should reproduce exactly.
-- Coaching marks are model-derived rider references, not universally safe braking or cornering markers.
+## 8. Review and change-control expectations
 
-## 7. Review and change-control expectations
-
-Reviews should be able to answer four separate questions:
-
-1. **Numerical regression:** with optional new physics disabled, does the frozen baseline remain reproducible?
-2. **Physics effect:** with a new model enabled on a fixed path, what changes and where?
-3. **Optimisation response:** after re-optimisation, what additional change comes from path adaptation rather than the physics feature itself?
-4. **Validation/presentation evidence:** are derived event locations and rider-facing outputs spatially plausible, traceable to explicit rules, and consistent with the solved trajectory?
-
-Do not collapse these questions into one total-lap-time comparison.
+Reviews should continue to separate numerical regression, physics effect, optimisation response, and validation/presentation evidence.
 
 Long-running optimisation diagnostics must record initial state, controls/policy, spacing, boundary margin, backend/workers, evaluation/sweep limits, termination reason, final step, and final fixed-grid re-evaluation. Saved controls and configuration hashes are preferable to relying on rerunning a local optimiser to reproduce a historical path.
 
-## 8. Interface boundary before run-off work
-
-The simulator now begins to provide rider-facing outputs such as braking onset/release, turn-in, apex, positive-drive pickup, exit, maximum speed, gear/RPM, lean and roll-transition landmarks.
-
-That does **not** yet freeze the run-off interface. The current event semantics must first be tested numerically and visually on Mallala. Only after that review should the project decide which trajectory fields, event types, provenance, confidence flags, coordinate systems, scenario metadata and later departure seeds belong in a versioned simulator-to-run-off contract.
-
-This sequencing is intentional: the downstream interface should reflect reviewed event semantics rather than make Phase 12A conform to a prematurely fixed schema.
+The next run-off work must likewise record interface version, simulator scenario/configuration identity, departure-seed rule, coordinate convention, and downstream assumptions so that run-off results remain traceable to the simulation state that generated them.
