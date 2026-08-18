@@ -1,16 +1,16 @@
 """Versioned simulator-to-run-off data contract and departure candidates.
 
-The objects in this module transfer simulator-derived facts downstream.  They
+The objects in this module transfer simulator-derived facts downstream. They
 intentionally stop before any run-off deceleration, surface, barrier, impact or
-risk calculation.  Candidate departure seeds are traceable interpretations of
-reviewed simulation events and are not safety criteria or claims about the
+risk calculation. Candidate departure seeds are traceable interpretations of
+supported simulation events and are not safety criteria or claims about the
 worst credible departure condition.
 """
 
 from dataclasses import dataclass
 import math
 from types import MappingProxyType
-from typing import Mapping, Sequence
+from typing import Mapping
 
 import numpy as np
 
@@ -71,6 +71,8 @@ _EVENT_TO_SEED = {
     ),
 }
 
+_ALLOWED_CONFIDENCE = {"high", "medium", "low"}
+
 
 @dataclass(frozen=True)
 class DepartureSeed:
@@ -99,32 +101,46 @@ class DepartureSeed:
 
 @dataclass(frozen=True)
 class RunoffInputPackage:
-    """Immutable simulator-side hand-off for a separate run-off package.
+    """Simulator-side hand-off for a separate run-off package.
 
     ``track_s_m`` is the reference-track parameter used to construct the
-    racing line. ``path_q_m`` is distance along the solved racing line.  The
+    racing line. ``path_q_m`` is distance along the solved racing line. The
     current coordinate frame is local Cartesian metres; a global CRS/world
     transform is deliberately not fabricated when georeferencing is absent.
+
+    Numeric/string trajectory arrays are defensive copies backed by immutable
+    bytes, so consumers cannot re-enable NumPy writes on the exported views.
     """
 
     interface_version: str
     coordinate_frame: str
     chainage_definition: str
+    track_length_m: float
+    path_length_m: float
+    sampling_convention: str
     trajectory: Mapping[str, np.ndarray]
     departure_seeds: tuple[DepartureSeed, ...]
     scenario_metadata: Mapping[str, str]
     warnings: tuple[str, ...]
 
 
-def _finite_1d(values, name, *, allow_object=False):
-    array = np.asarray(values)
+def _finite_1d(values, name):
+    array = np.asarray(values, dtype=float)
     if array.ndim != 1:
         raise ValueError(f"{name} must be one-dimensional")
-    if not allow_object:
-        array = np.asarray(array, dtype=float)
-        if not np.all(np.isfinite(array)):
-            raise ValueError(f"{name} must contain only finite values")
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must contain only finite values")
     return array
+
+
+def _immutable_array(values):
+    """Return an immutable-byte-backed NumPy view of one contiguous array."""
+    array = np.ascontiguousarray(values)
+    raw = array.tobytes()
+    result = np.frombuffer(raw, dtype=array.dtype).reshape(array.shape)
+    if result.flags.writeable:
+        raise RuntimeError("immutable trajectory array unexpectedly remains writeable")
+    return result
 
 
 def _validated_trajectory(columns):
@@ -132,30 +148,32 @@ def _validated_trajectory(columns):
     if missing:
         raise ValueError(f"run-off interface trajectory is missing fields: {missing}")
 
-    lengths = {len(np.asarray(columns[name])) for name in _REQUIRED_TRAJECTORY_FIELDS}
+    raw_required = {name: np.asarray(columns[name]) for name in _REQUIRED_TRAJECTORY_FIELDS}
+    if any(values.ndim != 1 for values in raw_required.values()):
+        raise ValueError("run-off interface trajectory fields must be one-dimensional")
+    lengths = {len(values) for values in raw_required.values()}
     if len(lengths) != 1:
         raise ValueError("run-off interface trajectory fields must have identical lengths")
     count = lengths.pop()
     if count < 3:
         raise ValueError("run-off interface requires at least three trajectory samples")
 
-    result = {}
-    for name in _REQUIRED_TRAJECTORY_FIELDS:
-        values = _finite_1d(columns[name], name)
-        if len(values) != count:
-            raise ValueError("run-off interface trajectory fields must have identical lengths")
-        copied = np.asarray(values).copy()
-        copied.setflags(write=False)
-        result[name] = copied
+    sample_values = _finite_1d(columns["sample_index"], "sample_index")
+    if not np.all(sample_values == np.arange(count, dtype=float)):
+        raise ValueError("sample_index must be contiguous integer values from zero")
 
-    sample_index = np.asarray(result["sample_index"], dtype=float)
-    if not np.all(sample_index == np.arange(count, dtype=float)):
-        raise ValueError("sample_index must be contiguous from zero")
+    result = {"sample_index": _immutable_array(np.arange(count, dtype=np.int64))}
+    for name in _REQUIRED_TRAJECTORY_FIELDS:
+        if name == "sample_index":
+            continue
+        values = _finite_1d(columns[name], name)
+        result[name] = _immutable_array(values)
+
     for name in ("track_s_m", "path_q_m"):
-        values = np.asarray(result[name], dtype=float)
+        values = result[name]
         if values[0] != 0.0 or np.any(np.diff(values) <= 0.0):
             raise ValueError(f"{name} must start at zero and increase strictly")
-    if np.any(np.asarray(result["speed_mps"], dtype=float) < 0.0):
+    if np.any(result["speed_mps"] < 0.0):
         raise ValueError("speed_mps must be non-negative")
 
     for name in _OPTIONAL_TRAJECTORY_FIELDS:
@@ -165,38 +183,65 @@ def _validated_trajectory(columns):
         if raw.ndim != 1 or len(raw) != count:
             raise ValueError(f"optional trajectory field {name} must match trajectory length")
         if raw.dtype.kind in "biufc":
-            values = np.asarray(raw, dtype=float)
-            if not np.all(np.isfinite(values)):
+            finite_check = np.asarray(raw, dtype=complex if raw.dtype.kind == "c" else float)
+            if not np.all(np.isfinite(finite_check)):
                 raise ValueError(f"optional trajectory field {name} must be finite")
-            copied = values.copy()
+            result[name] = _immutable_array(raw)
         else:
-            copied = raw.astype(object, copy=True)
-        copied.setflags(write=False)
-        result[name] = copied
+            strings = np.asarray([str(value) for value in raw], dtype=str)
+            result[name] = _immutable_array(strings)
 
     return result
 
 
-def derive_closed_path_heading_rad(x_m, y_m):
-    """Return wrapped path heading from periodic central differences.
+def _validated_total_length(total_length_m, q_m, name):
+    try:
+        total = float(total_length_m)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite scalar") from exc
+    if not math.isfinite(total) or total <= float(q_m[-1]):
+        raise ValueError(f"{name} must be finite and exceed the final omitted-endpoint chainage")
+    return total
 
-    A central chord is used so the calculation is deterministic and has no
-    dependency on optimiser control points or a track-centreline tangent.  A
-    repeated local chord is rejected rather than silently choosing an arbitrary
-    direction.
+
+def derive_closed_path_heading_rad(x_m, y_m, path_q_m, total_length_m):
+    """Return path heading using a periodic unequal-spacing derivative.
+
+    The derivative is with respect to ``path_q_m`` and uses the standard
+    three-point unequal-spacing formula at each sample. The start/finish
+    derivative uses the supplied closed-path total length to form the wrapped
+    previous/next spacing. This avoids the spacing bias of an unweighted
+    ``i-1`` to ``i+1`` chord.
     """
     x = _finite_1d(x_m, "x_m")
     y = _finite_1d(y_m, "y_m")
-    if x.shape != y.shape or len(x) < 3:
-        raise ValueError("closed-path heading requires equal x/y arrays with at least three samples")
-    dx = np.roll(x, -1) - np.roll(x, 1)
-    dy = np.roll(y, -1) - np.roll(y, 1)
-    chord = np.hypot(dx, dy)
-    if np.any(chord <= 1e-12):
-        raise ValueError("closed-path heading is undefined at a repeated/degenerate local chord")
-    heading = np.arctan2(dy, dx)
-    heading.setflags(write=False)
-    return heading
+    q = _finite_1d(path_q_m, "path_q_m")
+    if x.shape != y.shape or x.shape != q.shape or len(x) < 3:
+        raise ValueError(
+            "closed-path heading requires equal x/y/q arrays with at least three samples")
+    if q[0] != 0.0 or np.any(np.diff(q) <= 0.0):
+        raise ValueError("path_q_m must start at zero and increase strictly")
+    total = _validated_total_length(total_length_m, q, "path_length_m")
+
+    h_prev = q - np.roll(q, 1)
+    h_prev[0] = total - q[-1]
+    h_next = np.roll(q, -1) - q
+    h_next[-1] = total - q[-1]
+    if np.any(h_prev <= 0.0) or np.any(h_next <= 0.0):
+        raise ValueError("closed-path heading requires positive wrapped path spacing")
+
+    previous = np.roll(np.column_stack((x, y)), 1, axis=0)
+    current = np.column_stack((x, y))
+    following = np.roll(current, -1, axis=0)
+    a = -h_next / (h_prev * (h_prev + h_next))
+    b = (h_next - h_prev) / (h_prev * h_next)
+    c = h_prev / (h_next * (h_prev + h_next))
+    derivative = a[:, None] * previous + b[:, None] * current + c[:, None] * following
+    magnitude = np.hypot(derivative[:, 0], derivative[:, 1])
+    if np.any(magnitude <= 1e-12):
+        raise ValueError("closed-path heading is undefined at a repeated/degenerate local path sample")
+    heading = np.arctan2(derivative[:, 1], derivative[:, 0])
+    return _immutable_array(heading)
 
 
 def _event_value(event, name):
@@ -209,12 +254,51 @@ def _event_value(event, name):
     return getattr(event, name)
 
 
-def _validate_event_matches_trajectory(event, trajectory, *, atol=1e-8):
-    index = int(_event_value(event, "sample_index"))
-    count = len(trajectory["sample_index"])
+def _event_real_scalar(event, name, *, allow_nan=False):
+    value = _event_value(event, name)
+    if isinstance(value, (bool, np.bool_, str, bytes)):
+        raise ValueError(f"run-off departure event field {name} must be a numeric scalar")
+    array = np.asarray(value)
+    if array.ndim != 0:
+        raise ValueError(f"run-off departure event field {name} must be a scalar")
+    try:
+        result = float(array)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"run-off departure event field {name} must be numeric") from exc
+    if math.isnan(result) and allow_nan:
+        return result
+    if not math.isfinite(result):
+        raise ValueError(f"run-off departure event field {name} must be finite")
+    return result
+
+
+def _event_index(event, count):
+    value = _event_real_scalar(event, "sample_index")
+    if value != math.trunc(value):
+        raise ValueError("run-off departure event sample_index must be integer-valued")
+    index = int(value)
     if index < 0 or index >= count:
         raise ValueError("run-off departure event sample_index is outside the trajectory")
+    return index
 
+
+def _event_text(event, name):
+    value = _event_value(event, name)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"run-off departure event field {name} must be a non-empty string")
+    return value.strip()
+
+
+def _compare_event_field(event, event_name, expected, *, atol=1e-8):
+    actual = _event_real_scalar(event, event_name)
+    if not math.isclose(actual, float(expected), rel_tol=0.0, abs_tol=atol):
+        raise ValueError(
+            f"event field {event_name} does not match trajectory sample: "
+            f"event={actual!r} trajectory={float(expected)!r}")
+
+
+def _validate_event_matches_trajectory(event, trajectory, *, atol=1e-8):
+    index = _event_index(event, len(trajectory["sample_index"]))
     comparisons = (
         ("track_s_m", "track_s_m"),
         ("path_q_m", "path_q_m"),
@@ -225,39 +309,55 @@ def _validate_event_matches_trajectory(event, trajectory, *, atol=1e-8):
         ("curvature_1pm", "path_curvature_1pm"),
     )
     for event_name, trajectory_name in comparisons:
-        actual = float(_event_value(event, event_name))
-        expected = float(trajectory[trajectory_name][index])
-        if not (math.isfinite(actual) and math.isclose(actual, expected, rel_tol=0.0, abs_tol=atol)):
+        _compare_event_field(event, event_name, trajectory[trajectory_name][index], atol=atol)
+
+    event_lean_deg = _event_real_scalar(event, "lean_angle_deg")
+    expected_lean_deg = math.degrees(float(trajectory["roll_angle_rad"][index]))
+    if not math.isclose(event_lean_deg, expected_lean_deg, rel_tol=0.0, abs_tol=atol):
+        raise ValueError(
+            "event field lean_angle_deg does not match trajectory sample: "
+            f"event={event_lean_deg!r} trajectory={expected_lean_deg!r}")
+
+    event_roll_rate = _event_real_scalar(event, "roll_rate_radps", allow_nan=True)
+    if math.isfinite(event_roll_rate):
+        expected_roll_rate = float(trajectory["roll_rate_model_radps"][index])
+        if not math.isclose(event_roll_rate, expected_roll_rate, rel_tol=0.0, abs_tol=atol):
             raise ValueError(
-                f"event field {event_name} does not match trajectory sample {index}: "
-                f"event={actual!r} trajectory={expected!r}")
+                "event field roll_rate_radps does not match trajectory sample: "
+                f"event={event_roll_rate!r} trajectory={expected_roll_rate!r}")
     return index
 
 
-def build_departure_seeds(columns, events):
-    """Build traceable departure candidates from reviewed simulation events.
+def build_departure_seeds(columns, events, *, path_length_m):
+    """Build traceable departure candidates from supported simulation events.
 
-    Only explicitly mapped event semantics become candidates.  Capability-limit
-    flags, optimiser spread and other diagnostics are intentionally excluded.
+    Physical seed state is always taken from the validated trajectory. Event
+    copies are used only for index/provenance and stale-pair validation. A NaN
+    event roll-rate copy is permitted to mean that the event did not retain a
+    roll-rate value; the required trajectory roll-rate remains authoritative.
     """
     trajectory = _validated_trajectory(columns)
-    heading = derive_closed_path_heading_rad(trajectory["bike_x_m"], trajectory["bike_y_m"])
+    path_length = _validated_total_length(path_length_m, trajectory["path_q_m"], "path_length_m")
+    heading = derive_closed_path_heading_rad(
+        trajectory["bike_x_m"], trajectory["bike_y_m"], trajectory["path_q_m"], path_length)
     seeds = []
     counters = {}
     for event in events:
-        event_type = str(_event_value(event, "event_type"))
+        event_type = _event_text(event, "event_type")
         if event_type not in _EVENT_TO_SEED:
             continue
         index = _validate_event_matches_trajectory(event, trajectory)
-        corner = str(_event_value(event, "corner"))
+        corner = _event_text(event, "corner")
+        source_rule = _event_text(event, "source_rule")
+        confidence = _event_text(event, "confidence").lower()
+        if confidence not in _ALLOWED_CONFIDENCE:
+            raise ValueError(
+                f"run-off departure event confidence must be one of {sorted(_ALLOWED_CONFIDENCE)}")
+
         seed_type, interpretation = _EVENT_TO_SEED[event_type]
         key = (corner, seed_type)
         counters[key] = counters.get(key, 0) + 1
         seed_id = f"{corner}_{seed_type}_{counters[key]}"
-        lean_deg = float(_event_value(event, "lean_angle_deg"))
-        roll_rate = float(_event_value(event, "roll_rate_radps"))
-        if not math.isfinite(roll_rate):
-            roll_rate = float(trajectory["roll_rate_model_radps"][index])
         seeds.append(DepartureSeed(
             seed_id=seed_id,
             corner=corner,
@@ -274,33 +374,36 @@ def build_departure_seeds(columns, events):
             lateral_acceleration_mps2=float(
                 trajectory["lateral_acceleration_signed_mps2"][index]),
             curvature_1pm=float(trajectory["path_curvature_1pm"][index]),
-            lean_angle_rad=math.radians(lean_deg),
-            roll_rate_radps=roll_rate,
+            lean_angle_rad=float(trajectory["roll_angle_rad"][index]),
+            roll_rate_radps=float(trajectory["roll_rate_model_radps"][index]),
             source_event_type=event_type,
-            source_rule=str(_event_value(event, "source_rule")),
-            confidence=str(_event_value(event, "confidence")),
+            source_rule=source_rule,
+            confidence=confidence,
             interpretation=interpretation,
         ))
     return tuple(seeds)
 
 
 def build_runoff_input_package(
-        columns, events, *, scenario_metadata, warnings=()):
+        columns, events, *, track_length_m, path_length_m, scenario_metadata, warnings=()):
     """Create the current local-coordinate simulator-to-run-off hand-off."""
     trajectory = _validated_trajectory(columns)
-    heading = derive_closed_path_heading_rad(trajectory["bike_x_m"], trajectory["bike_y_m"])
-    heading_copy = np.asarray(heading).copy()
-    heading_copy.setflags(write=False)
+    track_length = _validated_total_length(
+        track_length_m, trajectory["track_s_m"], "track_length_m")
+    path_length = _validated_total_length(
+        path_length_m, trajectory["path_q_m"], "path_length_m")
+    heading = derive_closed_path_heading_rad(
+        trajectory["bike_x_m"], trajectory["bike_y_m"], trajectory["path_q_m"], path_length)
     trajectory = dict(trajectory)
-    trajectory["path_heading_rad"] = heading_copy
+    trajectory["path_heading_rad"] = heading
 
     metadata = {str(key): str(value) for key, value in dict(scenario_metadata).items()}
-    required_metadata = ("scenario_id", "simulator_commit", "track_id")
+    required_metadata = ("scenario_id", "simulator_commit", "track_id", "event_set_id")
     missing = [name for name in required_metadata if not metadata.get(name)]
     if missing:
         raise ValueError(f"run-off interface scenario metadata is missing: {missing}")
 
-    seeds = build_departure_seeds(trajectory, events)
+    seeds = build_departure_seeds(columns, events, path_length_m=path_length)
     warning_values = tuple(str(value) for value in warnings)
     return RunoffInputPackage(
         interface_version=RUNOFF_INTERFACE_VERSION,
@@ -308,6 +411,9 @@ def build_runoff_input_package(
         chainage_definition=(
             "track_s_m=reference-track parameter used to construct the racing line; "
             "path_q_m=arc length along the solved racing line"),
+        track_length_m=track_length,
+        path_length_m=path_length,
+        sampling_convention="closed loop; duplicated endpoint omitted",
         trajectory=MappingProxyType(trajectory),
         departure_seeds=seeds,
         scenario_metadata=MappingProxyType(metadata),
