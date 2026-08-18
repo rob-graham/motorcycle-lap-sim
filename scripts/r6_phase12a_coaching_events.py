@@ -691,6 +691,7 @@ def calculate_retained_case(args):
         "corner_review": corner_review,
         "events": events,
         "phase9": phase9,
+        "trajectory_export": trajectory,
     }
 
 
@@ -710,6 +711,7 @@ def main(argv=None):
     corner_review = retained["corner_review"]
     events = retained["events"]
     phase9 = retained["phase9"]
+    trajectory_export = retained["trajectory_export"]
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trajectory_csv = args.output_dir / "phase12a_representative_trajectory.csv"
@@ -719,7 +721,7 @@ def main(argv=None):
     visual_paths = {
         name: args.output_dir / filename for name, filename in VISUAL_OUTPUT_FILENAMES.items()
     }
-    trajectory.write_trajectory_csv(trajectory_csv, columns)
+    trajectory_export.write_trajectory_csv(trajectory_csv, columns)
     _write_events_csv(events_csv, events)
     _write_corner_review_csv(corner_review_csv, corner_review)
     limit_state_rows = _limit_state_rows(columns, bike)

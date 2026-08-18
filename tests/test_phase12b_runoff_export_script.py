@@ -16,6 +16,8 @@ def _load_script():
 
 def test_parser_retains_authoritative_mallala_defaults():
     module = _load_script()
+    assert module.EXPECTED_CONTROLS_SHA256 == (
+        "7e7916fb998a59b366441f5586134d7c8406d42232243141378cf83b22db1a3d")
     args = module.build_parser().parse_args(["controls.csv", "bundle"])
     assert args.delete_index == 26
     assert args.margin_m == pytest.approx(0.25)
