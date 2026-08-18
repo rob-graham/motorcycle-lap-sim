@@ -9,7 +9,7 @@ This contract defines the simulator-side hand-off to a separate run-off calculat
 
 The current ownership boundary is:
 
-- `motorcycle-lap-sim` owns solved trajectory state, simulator track-edge geometry, reviewed event provenance, and candidate departure-state extraction;
+- `motorcycle-lap-sim` owns solved trajectory state, simulator track-edge geometry, event provenance, and candidate departure-state extraction;
 - the separate run-off package will own off-track surface parameters, terrain propagation, stopping criteria, protection geometry, uncertainty treatment, and standards-comparison profiles.
 
 Candidate departure seeds are engineering starting points. They do not assert that a departure will occur there or that a selected point is the controlling case.
@@ -23,7 +23,9 @@ Two distance coordinates are retained:
 - `track_s_m`: reference-track parameter used to construct and sample the racing line;
 - `path_q_m`: arc length along the solved racing line.
 
-`path_heading_rad` is derived from the solved closed racing-line coordinates using a periodic central chord and `atan2(dy, dx)`.
+The package also requires explicit `track_length_m` and `path_length_m`. Samples follow the closed-loop convention **duplicated endpoint omitted**, so the final stored chainage is less than the corresponding total length and the total length supplies the wrap segment across start/finish.
+
+`path_heading_rad` is derived from the solved closed racing-line coordinates using a periodic three-point derivative with respect to `path_q_m`. The unequal-spacing derivative uses the wrapped path length at start/finish; it therefore does not rely on uniform trajectory sampling.
 
 ## Required trajectory state
 
@@ -31,17 +33,28 @@ The initial hand-off requires sample index, both chainages, racing-line x/y, phy
 
 Gear, RPM and selected model-limit flags may be included when present. Their presence is diagnostic and does not make them run-off criteria.
 
-Required arrays are equal-length deterministic copies. Chainages start at zero and increase strictly, sample indices are contiguous from zero, and exported arrays are read-only.
+Required arrays are equal-length defensive copies. Chainages start at zero and increase strictly, sample indices are contiguous integer values from zero, and numeric/string array storage is backed by immutable bytes so NumPy writes cannot simply be re-enabled by the consumer.
 
-## Scenario identity
+The interface performs structural consistency checks. It does **not** claim to re-prove complete track geometry correctness (for example, swapped boundaries or survey-grade spatial consistency); those matters remain tied to upstream geometry provenance and retained-case integration checks.
 
-Each package must include at least `scenario_id`, `simulator_commit`, and `track_id`. Additional metadata may record motorcycle configuration identity, retained-line identity, handling scenario, input hashes and geometry version. Warnings are transferred separately.
+## Scenario and event-set identity
+
+Each package must include at least:
+
+- `scenario_id`;
+- `simulator_commit`;
+- `track_id`; and
+- `event_set_id`.
+
+Additional metadata may record motorcycle configuration identity, retained-line identity, handling scenario, input hashes and geometry version. Warnings are transferred separately.
+
+`event_set_id` is the minimum provenance hook distinguishing the event set used for candidate extraction from arbitrary caller-created event objects. For the retained Mallala case, the later integration export should use an identifier/hash tied to the Phase 12A generated event artefact. This interface still validates individual event structure and state correspondence; it does not by itself certify that an arbitrary event set has undergone human review.
 
 ## Candidate departure seeds
 
-Version `0.1.0` maps only reviewed event semantics with a direct downstream engineering use:
+Version `0.1.0` maps only supported event semantics with a direct downstream engineering use:
 
-| Reviewed event | Candidate seed type |
+| Event | Candidate seed type |
 | --- | --- |
 | `local_max_speed` | `missed_braking_candidate` |
 | `braking_onset` | `upright_overrun_candidate` |
@@ -49,7 +62,9 @@ Version `0.1.0` maps only reviewed event semantics with a direct downstream engi
 | `geometric_apex` | `entry_lowside_apex_candidate` |
 | `positive_drive_pickup` | `exit_highside_candidate` |
 
-Each seed records the source event type, source rule, confidence and exact trajectory sample state. Event values are checked against the supplied trajectory before a seed is accepted, so stale event and trajectory data fail closed.
+Each seed records the source event type, source rule, confidence and exact trajectory sample state. The event sample index must be a finite integer-valued scalar; fractional, boolean, string, non-finite and array-like indices fail closed.
+
+Event copies of chainage, position, speed, longitudinal acceleration, curvature and lean are checked against the supplied trajectory. A finite event roll-rate copy is also checked against the trajectory roll-rate field. `NaN` roll rate is the one explicit missing-value convention: it means the event did not retain a roll-rate value, so the trajectory field remains authoritative. Physical seed values are always taken from the validated trajectory, not copied from the event object.
 
 The mapping deliberately excludes optimiser spread, optimiser control points and capability-limit classifications as automatic departure criteria.
 
@@ -67,7 +82,9 @@ Residual-speed-at-barrier criteria, including any future 24 km/h case, must ther
 
 ## Next increments
 
-After review of this contract, the next steps are to export the retained Mallala Phase 12A case through the interface, review the generated departure candidates, then begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. The first physical calculations will use a final speed of zero. Surface/terrain propagation, protection-geometry intersection and any non-zero barrier residual-speed criteria will then be added as separately reviewable increments, followed by standards comparison, georeferencing and 3D terrain fields.
+After review of this contract, the next step is a bounded retained-Mallala Phase 12A integration export using the retained trajectory and generated event set. That runtime/integration check should verify total-length and wrap semantics, event-set provenance, candidate counts/types and representative fields before the interface is treated as frozen.
+
+After that, begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. The first physical calculations will use a final speed of zero. Surface/terrain propagation, protection-geometry intersection and any non-zero barrier residual-speed criteria will then be added as separately reviewable increments, followed by standards comparison, georeferencing and 3D terrain fields.
 
 ## Interpretation boundary
 
