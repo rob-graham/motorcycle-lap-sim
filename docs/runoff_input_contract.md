@@ -55,11 +55,19 @@ The mapping deliberately excludes optimiser spread, optimiser control points and
 
 ## Explicit non-goals of version 0.1.0
 
-The first interface does not calculate off-track travel, assign surface coefficients, set a terminal-speed criterion, implement uncertainty distributions, reproduce the published MA comparison method, or generate the standards-comparison tangential envelope. Those are separate later increments with their own versioned assumptions and tests.
+The first interface does not calculate off-track travel, assign surface coefficients, implement uncertainty distributions, reproduce the published MA comparison method, or generate the standards-comparison tangential envelope. Those are separate later increments with their own versioned assumptions and tests.
+
+## Initial stopping-criterion decision for the run-off core
+
+The first deterministic physical run-off calculations will calculate stopping distance to `0.0 m/s` (0 km/h). This is the baseline stopping criterion for initial rider-slide, motorcycle-slide and other deterministic propagation models unless a scenario explicitly states otherwise.
+
+The provisional 24 km/h value considered in the earlier internal run-off working document is **not** the default stopping criterion. It was considered as a possible residual-speed limit for reaching an energy-absorbing protection system rather than as the normal definition of required run-off distance, and it has not been sufficiently established for production use.
+
+Residual-speed-at-barrier criteria, including any future 24 km/h case, must therefore be implemented later as separately named and versioned barrier/protection scenarios with explicit provenance, justification and sensitivity analysis. They must not silently shorten the baseline run-off-to-rest calculation.
 
 ## Next increments
 
-After review of this contract, the next steps are to export the retained Mallala Phase 12A case through the interface, review the generated departure candidates, then begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. Surface/terrain propagation, protection-geometry intersection, standards comparison, georeferencing and 3D terrain fields should then be added as separately reviewable increments.
+After review of this contract, the next steps are to export the retained Mallala Phase 12A case through the interface, review the generated departure candidates, then begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. The first physical calculations will use a final speed of zero. Surface/terrain propagation, protection-geometry intersection and any non-zero barrier residual-speed criteria will then be added as separately reviewable increments, followed by standards comparison, georeferencing and 3D terrain fields.
 
 ## Interpretation boundary
 
