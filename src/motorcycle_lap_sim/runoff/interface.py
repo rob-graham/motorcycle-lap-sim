@@ -72,6 +72,7 @@ _EVENT_TO_SEED = {
 }
 
 _ALLOWED_CONFIDENCE = {"high", "medium", "low"}
+_REQUIRED_METADATA_FIELDS = ("scenario_id", "simulator_commit", "track_id", "event_set_id")
 
 
 @dataclass(frozen=True)
@@ -328,6 +329,36 @@ def _validate_event_matches_trajectory(event, trajectory, *, atol=1e-8):
     return index
 
 
+def _validated_metadata(scenario_metadata):
+    """Validate provenance metadata without coercing identities to strings."""
+    if not isinstance(scenario_metadata, Mapping):
+        raise ValueError("run-off interface scenario metadata must be a mapping")
+
+    raw = dict(scenario_metadata)
+    invalid_keys = [key for key in raw if not isinstance(key, str) or not key.strip()]
+    if invalid_keys:
+        raise ValueError("run-off interface scenario metadata keys must be non-empty strings")
+
+    invalid_required = [
+        name for name in _REQUIRED_METADATA_FIELDS
+        if name not in raw or not isinstance(raw[name], str) or not raw[name].strip()
+    ]
+    if invalid_required:
+        raise ValueError(
+            "run-off interface required scenario metadata must be non-empty strings: "
+            f"{invalid_required}")
+
+    invalid_values = [
+        key for key, value in raw.items()
+        if not isinstance(value, str) or not value.strip()
+    ]
+    if invalid_values:
+        raise ValueError(
+            "run-off interface scenario metadata values must be non-empty strings: "
+            f"{invalid_values}")
+    return raw
+
+
 def build_departure_seeds(columns, events, *, path_length_m):
     """Build traceable departure candidates from supported simulation events.
 
@@ -397,11 +428,7 @@ def build_runoff_input_package(
     trajectory = dict(trajectory)
     trajectory["path_heading_rad"] = heading
 
-    metadata = {str(key): str(value) for key, value in dict(scenario_metadata).items()}
-    required_metadata = ("scenario_id", "simulator_commit", "track_id", "event_set_id")
-    missing = [name for name in required_metadata if not metadata.get(name)]
-    if missing:
-        raise ValueError(f"run-off interface scenario metadata is missing: {missing}")
+    metadata = _validated_metadata(scenario_metadata)
 
     seeds = build_departure_seeds(columns, events, path_length_m=path_length)
     warning_values = tuple(str(value) for value in warnings)
