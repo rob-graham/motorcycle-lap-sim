@@ -2,150 +2,76 @@
 
 ## Scope and conventions
 
-`motorcycle-lap-sim` is a clean-sheet minimum-lap-time motorcycle simulator and racing-line optimisation project. Internal calculations use SI units: metres, seconds, kilograms, radians, and derived SI units. Heading is measured counter-clockwise from the positive x-axis. Assumptions and model parameters must be explicit configuration or documented scenario data, not hidden constants.
+`motorcycle-lap-sim` is a clean-sheet minimum-lap-time motorcycle simulator and racing-line optimisation project. Internal calculations use SI units. Assumptions and model parameters must be explicit configuration or documented scenario data, not hidden constants.
 
-For project-level intent, evidence hierarchy, validation boundaries, and roadmap context, see [`project_context.md`](project_context.md). This file describes implemented repository architecture and the status of the simulation work.
+For project intent, evidence hierarchy, validation boundaries, and roadmap context, see [`project_context.md`](project_context.md). This file describes implemented architecture and current simulation status.
 
 ## Architectural separation
 
-The architecture deliberately separates the following concepts.
+The architecture deliberately separates:
 
-1. **Track geometry — what physical region is available to ride on?** Analytic centreline primitives, left/right widths, sampling, differential geometry, and boundaries define the permitted region. Track geometry does not choose a racing line or contain vehicle physics.
-2. **Racing-line/path geometry — what path through that region does the motorcycle follow?** The `racing_line` and path layers construct and validate supplied or spline-defined paths. They do not solve vehicle speed.
-3. **Motorcycle model — what physical capabilities and limits apply?** Immutable motorcycle configuration and independent force/limit functions define powertrain, resistance, load transfer, tyre/lean constraints, and optional simple handling-response limits.
-4. **Fixed-path speed solution — for one supplied path, what is the fastest feasible periodic speed profile?** `speed_solver` computes speed, acceleration, gear/RPM, lap time, active constraints, and diagnostics without choosing the path.
-5. **Racing-line optimisation — which permissible path minimises calculated lap time?** `optimisation` varies path controls and calls the fixed-path solver. It must not duplicate vehicle or geometry feasibility logic.
-6. **Telemetry/validation — how does the simulation compare with measured data?** `telemetry` imports, quality-checks, registers, map-matches, and compares measured sessions. Measured data remain outside core physics and optimisation.
-7. **Plotting/reporting — how are results inspected?** Plotting and diagnostic scripts consume numerical results but are not dependencies of numerical modules.
+1. **Track geometry** — physical rideable region, analytic primitives, widths, sampling, and boundaries.
+2. **Racing-line/path geometry** — supplied or spline-defined paths through that region.
+3. **Motorcycle model** — configuration, powertrain, resistance, load transfer, tyre/lean constraints, and optional simple handling-response limits.
+4. **Fixed-path speed solution** — fastest feasible periodic speed profile on one immutable path.
+5. **Racing-line optimisation** — path-control search calling the fixed-path solver.
+6. **Telemetry/validation** — ingestion, registration, map matching, and comparison with measured sessions.
+7. **Coaching/event extraction** — deterministic landmarks derived from solved trajectory state.
+8. **Plotting/reporting** — visual and diagnostic consumers of numerical results.
 
-The track, path, motorcycle, fixed-path solver, optimiser, and telemetry tools must remain independently testable and deterministic unless an explicitly documented feature requires otherwise.
+Measured telemetry is not a hidden dependency of core physics. Coaching/event extraction does not alter physics or optimisation.
 
-## Phase 1 - Track geometry
+## Implemented phases
 
-`track.primitives` provides analytic `Straight` and `CircularArc` geometry from a `Pose`. `track.track` composes primitives, retains width and closure intent, and reports closure errors without modifying geometry. `track.sampling` produces immutable samples approximately uniform in centreline arc length. `track.boundaries` offsets samples along normals; the positive normal points left of travel.
+### Track, motorcycle, fixed-path, racing-line and optimisation layers
 
-Closed-track samples omit the duplicate endpoint by default: `s=0` is present and `s=total_length` is absent. Open tracks include both ends. Primitive joins are represented once where a sample lies exactly on a join.
+The repository contains analytic track geometry and variable widths, immutable path representations, motorcycle configuration and capability functions, the authoritative Python fixed-path solver with optional validated Numba acceleration, supplied and smooth planar racing-line construction, and deterministic local direct-planar optimisation with explicit feasibility and termination reporting.
 
-## Phase 2 - Motorcycle physics
+The optimiser is local/warm-start dependent and makes no global-optimality claim.
 
-The `motorcycle` package provides immutable YAML configuration, deterministic engine interpolation, gearing, resistance forces, longitudinal axle loads, geometry-derived wheelie/stoppie limits, lateral/lean caps, and combined tyre limits. Physical formulas are independently testable and do not depend on track geometry or plotting.
+### Mallala validation and Level-1 roll sensitivity
 
-Optional `handling` configuration may define either or both:
+The Mallala/R6 workflow includes a frozen numerical baseline, telemetry ingestion/registration/map matching, Level-1 demanded lean and roll-rate diagnostics, an optional finite-roll speed ceiling, fixed-line and re-optimised comparisons, and spatial discrepancy diagnostics.
 
-- `max_path_curvature_rate_1pmps` — the earlier curvature-transient proxy; and
-- `max_roll_rate_radps` — the later Level-1 finite-roll sensitivity limit.
+The production finite-roll sensitivity uses the curvature-transition contribution to demanded roll rate. `max_roll_rate_radps` remains a replaceable scenario parameter and is not inferred automatically from telemetry.
 
-Omitting handling disables those optional response limits.
+Phase 10 is closed for the present development sequence with substantial R6 parameter calibration deferred for identifiability reasons; see [`phase10_mallala_closure.md`](phase10_mallala_closure.md).
 
-## Phase 3 - Fixed-path solver
+### Phase 11 - optimisation assurance closure
 
-The fixed-path solver calculates the fastest feasible periodic speed profile on one immutable closed `SampledPath`. It combines local speed ceilings with forward acceleration and backward braking propagation and reports lap time, speed, acceleration, gear/RPM, and constraint diagnostics.
+Phase 11 is closed; see [`phase11_optimisation_assurance_closure.md`](phase11_optimisation_assurance_closure.md).
 
-The authoritative implementation is the Python solver. An optional Numba backend accelerates the same fixed-path calculations and is checked against the Python result for accepted paths. Backend choice is a computational setting, not a different physical model.
+The retained representative is:
 
-See [`fixed_path_solver.md`](fixed_path_solver.md).
+- `reduced_reoptimised_51`;
+- common-grid lap `71.396583646 s`;
+- 0.250 m margin;
+- 0.8 rad/s finite-roll sensitivity;
+- 0.125 m authoritative Python common grid; and
+- 51 controls after deleting original control 26 and re-optimising the remainder.
 
-## Phase 4 - Supplied racing line
+It is an optimisation-assured feasible local solution for the current engineering task, not proof of global optimality. Optimiser/control-basis spread is numerical sensitivity, not physical uncertainty or a safety corridor.
 
-The racing-line layer accepts supplied lateral offsets, validates them against track widths, constructs displaced coordinates and path distance, and calculates periodic signed curvature as a generic `SampledPath`. It contains no optimiser or motorcycle-speed logic.
+### Phase 12A - coaching-event extraction closure
 
-See [`racing_line_representation.md`](racing_line_representation.md).
+Phase 12A is closed for the present Mallala engineering sequence; see [`phase12a_coaching_event_closure.md`](phase12a_coaching_event_closure.md) and [`coaching_event_definitions.md`](coaching_event_definitions.md).
 
-## Phase 5 - Initial local racing-line optimisation
+`motorcycle_lap_sim.coaching` extracts deterministic event landmarks from solved trajectory arrays. `scripts/r6_phase12a_coaching_events.py` reconstructs the retained Phase 11 basis, re-evaluates the supplied controls on the authoritative scenario/grid, fails closed if the lap does not reproduce the retained reference within tolerance, consolidates Mallala raw lean regions to T1-T9, extracts events, and writes trajectory/event/provenance/limit-state outputs.
 
-The original optimisation layer provides a C2 periodic cubic parameterisation, smooth asymmetric boundary-safe mapping, pure lap-time evaluation, and deterministic bounded coordinate search. It returns a locally optimised line and supports finer fixed-path re-evaluation. It makes no global-optimality claim.
+The final target-machine acceptance run reproduced `71.396583646 s` exactly, retained 12 generic lean regions, consolidated them to nine nominal corners, and generated the reviewed six-figure visual suite plus CSV diagnostics.
 
-See [`racing_line_optimisation.md`](racing_line_optimisation.md).
+The clean rider overview contains only BRK, TURN, APEX, DRIVE, and EXIT. Engineering detail may additionally contain MAX-BRK, REL, VMIN, K-MAX, maximum lean, roll transitions, gear shifts, trail-braking proxy, and longitudinal capability-limit classifications.
 
-## Phase 6 - Optional curvature-transient handling proxy
+Interpretation boundaries are explicit:
 
-The historical `max_path_curvature_rate_1pmps` feature places a path-curvature-transient speed ceiling in the fixed-path capability layer. It is a simple handling proxy, not validated steering dynamics, and remains optional for regression/sensitivity comparison.
+- DRIVE is longitudinal-acceleration-derived and is not throttle position;
+- REL is acceleration-derived and is not measured brake-lever release;
+- trail braking is a simulation-derived proxy, not measured brake pressure;
+- wheelie/stoppie/traction/power states are model capability diagnostics;
+- coaching-event locations are prototype engineering outputs rather than validated rider instruction; and
+- the retained Phase 11 trajectory is an engineering analysis path, **not a recommended rider line**.
 
-See [`curvature_transient_limit.md`](curvature_transient_limit.md).
-
-## Phase 7 - Smooth planar path geometry
-
-Phase 7 added an alternative C2-periodic Cartesian spline path representation so that analytic track curvature jumps do not have to become motorcycle-path curvature jumps. The fixed-path solver remains unaware of how the supplied `SampledPath` was constructed.
-
-See [`smooth_planar_racing_line.md`](smooth_planar_racing_line.md).
-
-## Phase 7.5 - Mallala reference geometry and variable widths
-
-`Track` supports track-wide default left/right half-widths with optional primitive-specific overrides. The QGIS-derived Mallala reference uses this mechanism and remains an approximate local-coordinate development geometry rather than a survey-grade georeferenced track model.
-
-See [`mallala_reference_track.md`](mallala_reference_track.md).
-
-## Phase 8 - Direct planar racing-line optimisation
-
-Phase 8 places physical lateral controls at geometry-derived stations and builds a non-uniform C2-periodic Cartesian spline through the resulting guide points. Continuous corridor and forward-progress checks are applied before fixed-path sampling. Path-model control resolution is distinct from fixed-path output resolution.
-
-The direct planar optimiser uses deterministic best-improvement polling with coordinate and smooth coupled directions, bounded controls, optional parallel complete-poll evaluation, warm starts, and explicit evaluation/sweep/step termination metadata. More controls do not imply a better solution and the method remains local/warm-start dependent.
-
-See [`direct_planar_racing_line_optimisation.md`](direct_planar_racing_line_optimisation.md).
-
-## Phase 9 - Mallala baseline, telemetry/roll validation and finite-roll sensitivity
-
-The repository implements the roadmap Phase 9 work, although some scripts retain historical `phase10` names from the repository development sequence. Reviewers should follow behaviour and documentation rather than infer roadmap meaning from script numbering alone.
-
-### Frozen numerical baseline
-
-The representative ideal-response baseline is the retained 52-control Mallala line in `cases/mallala_r6/baseline/phase8_reference_controls.csv`. Its identity, canonical input hashes, fixed-geometry regression values, and provenance limitations are documented in [`phase9_baseline_freeze.md`](phase9_baseline_freeze.md).
-
-The executable baseline is reproduced by `scripts/r6_phase9_baseline_check.py`. Change control is based on re-evaluating the saved geometry, not assuming a fresh local optimisation will recover the same path.
-
-### Telemetry subsystem
-
-The `telemetry` package contains AiM/Excel ingestion, source-quality handling, rigid 2D registration, nearest/map matching, cross-lap/peer diagnostics, repeatability measures, and speed comparison utilities. Diagnostic scripts provide Mallala session checks, registration, speed validation, roll-related comparisons, and trajectory exports.
-
-The supplied R6 session is case-specific and incompletely characterised. Raw data are not a hidden simulator dependency and are not treated as universal truth. See [`mallala_r6_telemetry_integrity.md`](mallala_r6_telemetry_integrity.md).
-
-### Level-1 demanded lean and finite roll response
-
-`motorcycle.roll` provides planar steady lean demand
-
-`phi = atan(v^2 * kappa / g)`
-
-and roll-rate diagnostics. The production finite-roll sensitivity ceiling uses the curvature-transition contribution
-
-`phi_dot = (v^3 * kappa' / g) / (1 + (v^2 * kappa / g)^2)`
-
-with an explicit positive `max_roll_rate_radps` scenario parameter. This expression intentionally omits the additional lean-rate contribution caused by longitudinal acceleration/braking. The omission keeps the Level-1 feature simple and trajectory-driven; it must be stated when interpreting results.
-
-The roll-rate parameter is not inferred automatically from telemetry and must not be presented as a calibrated R6/rider constant unless separate evidence establishes that.
-
-### Fixed-line and re-optimised comparisons
-
-Repository diagnostics support:
-
-- ideal-response frozen-line evaluation;
-- finite-roll evaluation on the same frozen path, isolating the physics effect;
-- roll-aware re-optimisation, isolating path adaptation after the physics change; and
-- sector/spatial comparison with measured Mallala telemetry.
-
-A total lap-time match is not an acceptance criterion. Validation should examine where time is gained/lost, local speed and line agreement, transition behaviour, and active constraints.
-
-## Phase 10 - Calibration/hold-out closure
-
-The full Mallala validation/runtime chain has been reproduced on current `main`; see [`phase10_mallala_closure.md`](phase10_mallala_closure.md). The repository now records Phase 10 as closed for the present development sequence with substantial R6 parameter calibration **deferred for identifiability reasons**.
-
-The current evidence does not justify fitting a small motorcycle parameter subset from this one incompletely characterised rider/bike/session and approximate track geometry without material compensation/overfitting risk. The provisional motorcycle must therefore not be described as calibrated merely because selected finite-roll cases approach measured lap times.
-
-The closure preserves these boundaries:
-
-- mass, power/torque, drag, grip/utilisation, gearing/radius, edge margin and handling response are not jointly tuned to the Mallala lap;
-- `max_roll_rate_radps` remains an uncalibrated sensitivity/scenario parameter;
-- Lap 5 remains the first future calibration/development candidate;
-- Lap 4 remains the first untouched hold-out candidate;
-- Laps 1-3 remain additional out-of-fit comparisons; and
-- future calibration requires new evidence that makes a deliberately small bounded parameter subset meaningfully identifiable, followed by hold-out evaluation without further fitting.
-
-The correct claim is **Mallala R6 case validation**, not general validation of all riders, motorcycles, or circuits.
-
-## Phase 11 - Optimisation assurance and robust line generation
-
-Phase 11 is now the active roadmap phase after Phase 10 closure. The repository retains the bounded `r6_phase11a_*` multistart and `r6_phase11b_*` hierarchy diagnostics. They document practical search/warm-start limitations of the current deterministic planar optimiser. They are assurance checks rather than core physics and do not establish a globally optimal racing line.
-
-The superseded Phase 11C/11D experiments must not be revived simply because the local optimiser is warm-start dependent. Any new optimisation work requires a stated engineering need, bounded benchmark against the retained method, common-grid ranking, runtime reporting, deterministic reproduction, and meaningful regression/behavioural tests.
+A known retained-path artefact is that the closed-loop racing line bends toward the centre of the start/finish straight. This should not be presented to riders as a recommended line. It does not block downstream run-off calculations.
 
 ## Current module status
 
@@ -154,22 +80,34 @@ The superseded Phase 11C/11D experiments must not be revived simply because the 
 - `racing_line`: supplied and smooth planar path construction/validation.
 - `motorcycle`: immutable configuration, forces, powertrain, limits, and Level-1 roll calculations.
 - `speed_solver`: deterministic periodic fixed-path minimum-time solver plus optional validated Numba backend.
-- `optimisation`: local deterministic racing-line optimisation, direct planar controls, warm starts, and diagnostics.
+- `optimisation`: local deterministic racing-line optimisation, direct planar controls, warm starts, and assurance diagnostics.
 - `telemetry`: Mallala data ingestion, quality, registration, map matching, repeatability/peer analysis, and comparison utilities.
-- `plotting` and scripts: reporting, validation, regression, and engineering diagnostics kept separate from numerical modules.
+- `coaching`: deterministic extraction of reviewed rider-facing and engineering landmarks from solved trajectory state.
+- plotting/scripts: reporting, validation, regression, coaching presentation, and engineering diagnostics kept separate from numerical modules.
 
 ## Validation and claim boundaries
 
-Repository reviews must preserve the distinction between:
+Repository reviews must preserve the distinction between numerical verification, model sensitivity, optimisation response, case validation, and general validity.
 
-- **numerical verification** — reproducibility of saved geometry and solver outputs;
-- **model sensitivity** — effect of enabling a physics/handling feature on the same path;
-- **optimisation response** — additional effect after the line is allowed to change;
-- **case validation** — comparison with the available Mallala R6 evidence; and
-- **general validity** — which is not established by one motorcycle, rider, session, or track.
+The measured rider line is validation evidence, not the optimiser objective. The simulator represents a modelled high-performance/minimum-time scenario within stated constraints, not a prediction of a particular rider's exact actions. Coaching landmarks are model-derived reference information, not universally safe physical markers.
 
-The measured rider line is validation evidence, not the optimiser objective. The simulator represents a modelled high-performance/minimum-time scenario within stated constraints, not a prediction of a particular rider's exact actions.
+The Mallala geometry is approximate rather than survey-grade, and the provisional R6 model remains incompletely identified.
 
-## Future interfaces, not current capability claims
+## Next active interface - simulator to run-off calculations
 
-The wider project roadmap proposes formal coaching-event extraction, robust line/envelope outputs, GIS/georeferencing, a reusable 3D `TrackSurface`/`z(s,n)` interface, grade/banking in the lap solver, and a separate run-off package consuming versioned trajectory/event/terrain results. These should be implemented only through explicit interfaces and tests and must not be described as current repository capability until code supports them.
+With Phase 12A's numerical and visual review complete, the next active task is to define the versioned simulator-to-run-off calculation interface.
+
+This interface should be designed around downstream run-off engineering needs and should explicitly define:
+
+- trajectory/path and track chainage conventions;
+- local/global coordinates and boundary geometry;
+- speed, acceleration, curvature, lean/roll state, and any other required solved fields;
+- which reviewed events, provenance and confidence fields are useful downstream;
+- candidate departure-point / departure-condition seed rules;
+- model/scenario/configuration identity;
+- coordinate-system and version metadata; and
+- the boundary between simulator-derived quantities and assumptions owned by the separate run-off package.
+
+The interface must not silently convert coaching marks or optimiser outputs into safety criteria. Run-off departure seeds and downstream calculations require their own explicit engineering rules and provenance.
+
+Future roadmap work also includes GIS/georeferencing and a reusable 3D `TrackSurface` / `z(s,n)` interface with grade/banking. Those remain future capability unless current repository code and tests explicitly implement them.

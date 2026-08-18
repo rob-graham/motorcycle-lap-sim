@@ -1,95 +1,68 @@
 # Development scope review
 
-**Review date:** 2026-08-17
+**Review date:** 2026-08-18
 
-This review resolves the development detour that followed the Mallala Phase 9
-work. The Phase 9/10 validation/runtime workflow has now been reproduced on
-current `main`, its decision-relevant validation gaps are recorded, and Phase
-10 is closed for the present development sequence with substantial parameter
-calibration explicitly deferred for identifiability reasons.
+This review records the bounded development sequence through Phase 12A and identifies the next active engineering task.
 
-## Decisions
+## Closed decisions retained
 
-- Retain the Phase 11A deterministic multistart diagnostic and Phase 11B
-  hierarchical warm-start diagnostic only as bounded evidence of the existing
-  optimiser's warm-start dependence.
-- Remove the merged Phase 11C latent basin-search script and its unit tests. It
-  introduced another search representation but did not change the production
-  optimiser, physical model, or Phase 9/10 validation capability.
-- Do not merge pull requests #41, #42, or #43. They predate the current project
-  documentation and belong to the superseded optimiser-experiment sequence.
-  Any independently useful defect fix must be proposed again as a small change
-  against current `main`, with an executable current-main failure and regression
-  test demonstrating why it is required.
-- Do not revive the rejected Phase 11C/11D experiments merely because the local
-  optimiser is warm-start dependent.
-- Phase 10 substantial R6 parameter calibration is deferred rather than forced
-  against one incompletely characterised rider/bike/session and approximate
-  track geometry. Existing defaults remain provisional and replaceable.
-- Preserve Lap 5 as the first future calibration/development candidate and Lap 4
-  as the first untouched hold-out candidate; Laps 1-3 remain additional
-  out-of-fit comparisons.
+- Phase 10 substantial R6 parameter calibration remains deferred for identifiability reasons. The provisional motorcycle/rider/session model is not treated as calibrated merely because selected sensitivity cases approach measured lap times.
+- `max_roll_rate_radps` remains a scenario/sensitivity parameter rather than an identified R6/rider constant.
+- Lap 5 remains the first future calibration/development candidate, Lap 4 the first untouched hold-out candidate, and Laps 1-3 additional out-of-fit comparisons.
+- Phase 11 is closed with `reduced_reoptimised_51` retained as the representative line for downstream engineering work.
+- Superseded Phase 11C/11D optimiser experiments are not to be revived merely because the local optimiser is warm-start dependent.
+- New optimisation work requires a new downstream engineering reason and a bounded benchmark against the retained method.
 
-## Main-branch review findings
+## Phase 11 retained representative
 
-The full test run first exposed a real baseline-workflow defect: the frozen
-control CSV identity was being checked with platform-dependent working-tree byte
-hashes. On Windows with `core.autocrlf=true`, the repository LF text was
-materialised as CRLF and therefore produced different SHA-256 values despite
-identical text content and identical numerical results.
+The retained representative was re-evaluated on the 0.125 m authoritative Python common grid with 0.250 m margin and the 0.8 rad/s finite-roll sensitivity scenario.
 
-That defect was corrected by defining the baseline identities as SHA-256 of
-UTF-8 text with newlines canonicalised to LF. The canonical hashes and numerical
-baseline remain unchanged. The Windows environment that exposed the defect then
-reported `236 passed`, and `python scripts/r6_phase9_baseline_check.py` ended
-with `executable_baseline_regression_status=passed`.
+The final retained line is `reduced_reoptimised_51` at `71.396583646 s`.
 
-The complete Mallala runtime chain was then exercised on current `main` using
-the supplied R6 workbook:
+This is a feasible, optimisation-assured local solution suitable for the present engineering task, not proof of global optimality. Optimiser/control-basis spread remains numerical sensitivity and must not be presented as physical model uncertainty, rider variability, a run-off corridor, or a regulatory criterion.
 
-- telemetry ingestion reproduced 9,580 samples, five complete laps and the
-  incomplete sixth lap;
-- rigid registration converged in 66 iterations, with 2.5763 m RMS residual and
-  219/256 bins containing all five selected laps;
-- the frozen ideal-response line reproduced 69.354897583 s and showed a broad
-  +1.9362 m/s mean speed bias relative to the measured median;
-- fixed-line finite-roll sensitivity materially reduced the discrepancy without
-  changing motorcycle performance parameters, but no single roll-rate value was
-  preferred by all comparison metrics.
+See [`phase11_optimisation_assurance_closure.md`](phase11_optimisation_assurance_closure.md).
 
-The detailed evidence and calibration decision are recorded in
-[`phase10_mallala_closure.md`](phase10_mallala_closure.md).
+## Phase 12A closure decision
 
-## Phase 10 closure decision
+Phase 12A coaching-event extraction and Mallala visual review are now closed for the present engineering sequence; see [`phase12a_coaching_event_closure.md`](phase12a_coaching_event_closure.md).
 
-The simulator is a minimum-time / high-performance scenario model, while the
-available validation evidence is one human rider, one incompletely
-characterised motorcycle/session, uncertain logger details, and approximate
-track geometry. The remaining discrepancy is not sufficiently identifiable to
-justify fitting a small motorcycle parameter subset without material
-compensation/overfitting risk.
+The final target-machine run reproduced the Phase 11 representative exactly at `71.396583646 s`, retained 12 generic lean regions, consolidated them to nine T1-T9 Mallala corners, and generated the reviewed rider overview, speed map, regional engineering detail plots, event/provenance CSVs, and longitudinal limit-state diagnostic.
 
-Phase 10 is therefore closed for the present sequence with substantial
-calibration deferred. This is not a claim that the R6 reference is calibrated.
-`max_roll_rate_radps` remains a sensitivity/scenario parameter, and the current
-mass, power/torque, drag, grip/utilisation, gearing/radius and related defaults
-retain their documented provisional status.
+The final event semantics include BRK, TURN, APEX, DRIVE and EXIT on the clean overview, with MAX-BRK, REL, VMIN, K-MAX, maximum lean, roll transitions, gear shifts, trail-braking proxy and capability-limit states available for engineering review.
 
-Calibration may be reopened when better measured bike/rider/setup inputs,
-improved track geometry, clarified logger/roll interpretation, additional
-sessions/riders, or a strongly attributable local discrepancy makes a bounded
-parameter subset meaningfully identifiable.
+Phase 12A closes with explicit limitations rather than additional polishing requirements:
 
-## Re-entry criteria for optimisation work
+- coaching marks are model-derived prototype engineering outputs, not validated rider instruction;
+- several experienced riders should review the marks before any future rider-facing coaching use;
+- DRIVE is not throttle position, REL is not measured brake-lever release, and trail braking is a simulation-derived proxy;
+- wheelie/stoppie/traction/power classifications are model capability diagnostics;
+- the retained Phase 11 trajectory is an engineering simulation path, **not a recommended rider line**; and
+- the bend toward the centre of the start/finish straight is a known modelling/optimisation artefact and must not be presented as a rider recommendation.
 
-The former Phase 9/10 runtime gate is now satisfied: the workflow is
-reproducible and its decision-relevant validation limitations are explicitly
-recorded. Phase 11 optimisation-assurance work may therefore resume, but only
-against a stated engineering need.
+These limitations do not block the next run-off stage.
 
-A future optimiser change requires a bounded benchmark against the retained
-method, common-grid ranking, runtime reporting, deterministic reproduction, and
-tests that do more than exercise a new helper function. Existing Phase 11A/B
-results are evidence about search convergence/warm-start dependence, not proof
-of global optimality or permission to extend the superseded home-grown search
-sequence without a new engineering justification.
+## Current re-entry criteria for optimisation or coaching work
+
+Further optimisation work requires a downstream finding that the retained representative is not fit for the engineering purpose at hand, or another explicit engineering need.
+
+Further coaching/rider-facing refinement requires a separate purpose, such as multi-rider review, improved rider/control modelling, or a need to publish validated rider guidance. It is not required merely to continue the engineering run-off workflow.
+
+## Next bounded task: simulator-to-run-off calculation interface
+
+The Phase 12A visual gate has now been passed. The next active task is therefore to define and test the versioned simulator-to-run-off contract and the candidate departure-condition workflow.
+
+The next stage should decide which solved trajectory fields and reviewed events are transferred downstream, while keeping run-off assumptions separate from coaching and optimiser semantics.
+
+At minimum, the interface work should define:
+
+- trajectory/path and track chainage conventions;
+- coordinate systems and track-boundary geometry;
+- speed and longitudinal/lateral acceleration fields;
+- curvature and lean/roll-state fields where useful;
+- reviewed event provenance/confidence where useful;
+- candidate departure-point / departure-condition seed rules;
+- scenario/model/configuration identity and versioning; and
+- the ownership boundary between simulator output and the separate run-off package.
+
+The downstream interface must not treat coaching marks, optimiser controls, optimiser spread, or capability-limit classifications as safety criteria by default. Each run-off input must have an explicit engineering reason, definition, units, and provenance.
