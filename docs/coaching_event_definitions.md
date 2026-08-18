@@ -29,18 +29,19 @@ This geometry-overlap step is intentionally case-specific. It avoids introducing
 
 ## Event rules
 
-For each accepted corner the initial implementation records:
+For each accepted nominal corner the implementation records:
 
 - `local_max_speed`: maximum speed between the previous corner exit and braking onset, or turn-in if no strong braking episode is detected;
 - `braking_onset`: beginning of sustained deceleration before a strong-braking sample;
 - `maximum_braking`: minimum longitudinal acceleration in the approach/corner search window;
 - `brake_release`: first actual recovery above the release threshold after maximum braking; no release event is emitted merely because the search window ended;
-- `turn_in`: start of the sustained lean region after hysteresis;
-- `geometric_apex`: maximum absolute racing-line curvature within the corner region;
+- `turn_in`: first meaningful movement from the approach/outside condition toward the inside edge, bounded by the accepted raw region and nominal-corner ownership; a traceable medium-confidence bounded fallback is used for compound geometry;
+- `geometric_apex`: minimum Euclidean racing-line clearance to the sampled physical inside track edge, with turn direction selecting left or right;
+- `maximum_curvature`: maximum absolute racing-line curvature, retained as a separate engineering event;
 - `speed_apex`: minimum speed within the corner region, retained separately when it differs from the geometric apex;
 - `maximum_lean`: maximum absolute demanded lean, retained separately when it differs from the other apex events;
-- `positive_drive_pickup`: first sustained positive longitudinal acceleration after the speed apex;
-- `corner_exit`: end of the sustained lean region after hysteresis;
+- `positive_drive_pickup`: a real below-to-above positive-drive threshold crossing after the speed apex that remains above threshold for the hold distance; an already-positive search start or transient spike emits no event;
+- `corner_exit`: first meaningful departure from the inside-edge/apex condition toward the exit/outside, bounded by nominal ownership rather than residual low-angle lean;
 - `roll_transition`: minimum absolute demanded lean between consecutive opposite-direction corner regions; and
 - `gear_shift`: solver gear-number change between adjacent samples.
 
@@ -74,20 +75,17 @@ Each event records:
 
 GIS coordinates are not added in Phase 12A because the current Mallala geometry is still local/approximate. That field belongs in a later georeferenced result/export layer.
 
-## Rider-facing map
+## Phase 12A visual-validation suite
 
-The Phase 12A racing-line image is intentionally presentation-focused. It contains:
+All five figures consume the same solved retained trajectory and extracted event set; they do not re-solve or alter the representative line.
 
-- physical track edges;
-- the retained representative racing line;
-- start/finish; and
-- rider-facing coaching marks for braking onset, brake release, turn-in, geometric apex, positive-drive pickup and corner exit.
+- `phase12a_coaching_overview.png` is the clean whole-lap rider overview. It shows only BRK, TURN, geometric APEX, GAS (when present), and EXIT; REL and engineering events are deliberately absent.
+- `phase12a_speed_map.png` continuously colours the racing line by authoritative solved speed in km/h, with only small BRK/APEX/GAS marks.
+- `phase12a_T1_T3_detail.png`, `phase12a_T4_T6_detail.png`, and `phase12a_T7_T9_detail.png` provide equal-scale regional engineering review. They include REL where present and distinguish speed apex and maximum curvature from geometric apex. Their extents derive automatically from the selected event/corner spans with a fixed spatial margin.
 
-Labels show the corner, event abbreviation, speed, and where useful gear or demanded lean.
+The generic 6/4-degree lean hysteresis remains a raw candidate-region detector. It does not directly define rider-facing TURN or EXIT. Mallala's nominal-corner ownership and T3/T6/T7 compound grouping remain explicitly case-specific; the event landmarks inside those bounded searches are still derived from trajectory geometry. Missing GAS, braking, release, or engineering events are represented by absence rather than fabricated fallback locations.
 
-The coaching image must not show optimiser control points, optimiser/control-basis spread, margin-corridor lines, centreline diagnostics, convergence information, or other development-only overlays.
-
-Additional extracted events such as maximum braking, speed apex, maximum lean, roll transition and gear shifts remain in the machine-readable event table but are not drawn by default to avoid obscuring the rider-facing map.
+Optimiser controls, optimiser spread/envelopes, corridor and centreline diagnostics, convergence metrics, and dense engineering annotations remain excluded from the clean overview. Gear/state/lean/roll-rate coloured maps, polished corner sheets, and richer chainage diagnostics are prospective Phase 12B work, not Phase 12A deliverables.
 
 ## Review gate before run-off interface work
 

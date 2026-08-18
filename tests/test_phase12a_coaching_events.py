@@ -33,15 +33,24 @@ def test_map_contains_only_rider_facing_event_types():
     module = _module()
     assert module.MAP_EVENT_TYPES == (
         "braking_onset",
-        "brake_release",
         "turn_in",
         "geometric_apex",
         "positive_drive_pickup",
         "corner_exit",
     )
     assert "maximum_braking" not in module.MAP_EVENT_TYPES
+    assert "brake_release" not in module.MAP_EVENT_TYPES
     assert "gear_shift" not in module.MAP_EVENT_TYPES
     assert "roll_transition" not in module.MAP_EVENT_TYPES
+
+
+def test_visual_output_names_are_the_phase12a_review_suite():
+    module = _module()
+    assert set(module.VISUAL_OUTPUT_FILENAMES.values()) == {
+        "phase12a_coaching_overview.png", "phase12a_speed_map.png",
+        "phase12a_T1_T3_detail.png", "phase12a_T4_T6_detail.png",
+        "phase12a_T7_T9_detail.png",
+    }
 
 
 def test_mallala_reference_filter_rejects_three_straight_setup_regions():

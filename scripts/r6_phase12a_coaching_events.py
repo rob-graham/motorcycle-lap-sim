@@ -67,13 +67,18 @@ EVENT_FIELDS = (
     "display_on_map",
 )
 
-MAP_EVENT_TYPES = (
+OVERVIEW_EVENT_TYPES = (
     "braking_onset",
-    "brake_release",
     "turn_in",
     "geometric_apex",
     "positive_drive_pickup",
     "corner_exit",
+)
+MAP_EVENT_TYPES = OVERVIEW_EVENT_TYPES
+
+DETAIL_EVENT_TYPES = (
+    "braking_onset", "brake_release", "turn_in", "geometric_apex",
+    "positive_drive_pickup", "corner_exit", "speed_apex", "maximum_curvature",
 )
 
 EVENT_ABBREVIATIONS = {
@@ -83,6 +88,8 @@ EVENT_ABBREVIATIONS = {
     "geometric_apex": "APEX",
     "positive_drive_pickup": "GAS",
     "corner_exit": "EXIT",
+    "speed_apex": "V-APEX",
+    "maximum_curvature": "K-MAX",
 }
 
 EVENT_MARKERS = {
@@ -92,6 +99,16 @@ EVENT_MARKERS = {
     "geometric_apex": "o",
     "positive_drive_pickup": "^",
     "corner_exit": "x",
+    "speed_apex": "D",
+    "maximum_curvature": "P",
+}
+
+VISUAL_OUTPUT_FILENAMES = {
+    "coaching_overview": "phase12a_coaching_overview.png",
+    "speed_map": "phase12a_speed_map.png",
+    "detail_T1_T3": "phase12a_T1_T3_detail.png",
+    "detail_T4_T6": "phase12a_T4_T6_detail.png",
+    "detail_T7_T9": "phase12a_T7_T9_detail.png",
 }
 
 
@@ -231,64 +248,144 @@ def _event_label(event):
     return f"{event.corner} {code}\n{speed} km/h{gear}"
 
 
-def _write_coaching_png(path, track, columns, events, *, max_roll_rate_radps, dpi):
-    import matplotlib.pyplot as plt
+def _track_plot_data(columns):
+    return tuple(np.asarray(columns[name], dtype=float) for name in (
+        "left_boundary_x_m", "left_boundary_y_m", "right_boundary_x_m",
+        "right_boundary_y_m", "bike_x_m", "bike_y_m"))
 
-    track_s = np.asarray(columns["track_s_m"], dtype=float)
-    sampled_track = sample_track_stations(track, track_s)
-    left_x = sampled_track.x_m + sampled_track.width_left_m * sampled_track.normal_x
-    left_y = sampled_track.y_m + sampled_track.width_left_m * sampled_track.normal_y
-    right_x = sampled_track.x_m - sampled_track.width_right_m * sampled_track.normal_x
-    right_y = sampled_track.y_m - sampled_track.width_right_m * sampled_track.normal_y
-    sf_left, sf_right = _start_finish_segment(track)
 
-    figure, axis = plt.subplots(figsize=(13, 10))
-    axis.plot(left_x, left_y, linewidth=0.45, label="Track edge")
-    axis.plot(right_x, right_y, linewidth=0.45)
-    axis.plot(columns["bike_x_m"], columns["bike_y_m"], linewidth=1.05,
+def _draw_base(axis, columns):
+    left_x, left_y, right_x, right_y, bike_x, bike_y = _track_plot_data(columns)
+    axis.plot(left_x, left_y, color="0.45", linewidth=0.55, label="Track edge")
+    axis.plot(right_x, right_y, color="0.45", linewidth=0.55)
+    axis.plot(bike_x, bike_y, color="C0", linewidth=1.15,
               label="Representative racing line")
-    axis.plot([sf_left[0], sf_right[0]], [sf_left[1], sf_right[1]],
-              linewidth=1.0, linestyle="--", label="Start / finish")
 
-    map_events = [event for event in events
-                  if event.display_on_map and event.event_type in MAP_EVENT_TYPES]
-    for event_type in MAP_EVENT_TYPES:
-        selected = [event for event in map_events if event.event_type == event_type]
+
+def _draw_start_finish(axis, track):
+    sf_left, sf_right = _start_finish_segment(track)
+    axis.plot([sf_left[0], sf_right[0]], [sf_left[1], sf_right[1]],
+              color="black", linewidth=1.0, linestyle="--", label="Start / finish")
+
+
+def _corner_events(events, first, last):
+    names = {f"T{number}" for number in range(first, last + 1)}
+    return [event for event in events if event.corner in names]
+
+
+def _draw_corner_labels(axis, events, first=1, last=9):
+    for number in range(first, last + 1):
+        apex = next(event for event in events
+                    if event.corner == f"T{number}" and event.event_type == "geometric_apex")
+        axis.annotate(f"T{number}", (apex.x_m, apex.y_m), xytext=(7, 7),
+                      textcoords="offset points", fontsize=8, fontweight="bold")
+
+
+def _scatter_events(axis, events, event_types, *, annotate=False):
+    for event_type in event_types:
+        selected = [event for event in events if event.event_type == event_type]
         if not selected:
             continue
-        axis.scatter(
-            [event.x_m for event in selected], [event.y_m for event in selected],
-            marker=EVENT_MARKERS[event_type], s=24, linewidths=0.8,
-            label=EVENT_ABBREVIATIONS[event_type], zorder=5,
-        )
+        axis.scatter([event.x_m for event in selected], [event.y_m for event in selected],
+                     marker=EVENT_MARKERS[event_type], s=24, linewidths=0.8,
+                     label=EVENT_ABBREVIATIONS[event_type], zorder=5)
+        if annotate:
+            for event in selected:
+                speed = int(round(event.speed_mps * 3.6))
+                axis.annotate(f"{event.corner} {EVENT_ABBREVIATIONS[event_type]} {speed}",
+                              (event.x_m, event.y_m), xytext=(5, 5),
+                              textcoords="offset points", fontsize=6,
+                              bbox={"boxstyle": "round,pad=0.12", "fc": "white",
+                                    "alpha": 0.78, "linewidth": 0.25})
 
-    # Short rider-facing labels are offset in alternating directions.  No
-    # optimiser controls, corridor/envelope, centreline or diagnostic metrics
-    # are drawn on this image.
-    offsets = ((5, 5), (5, -16), (-44, 5), (-44, -16))
-    for index, event in enumerate(map_events):
-        dx, dy = offsets[index % len(offsets)]
-        axis.annotate(
-            _event_label(event),
-            (event.x_m, event.y_m),
-            xytext=(dx, dy), textcoords="offset points", fontsize=5.7,
-            arrowprops={"arrowstyle": "-", "linewidth": 0.35},
-            bbox={"boxstyle": "round,pad=0.15", "fc": "white", "alpha": 0.78,
-                  "linewidth": 0.25},
-            zorder=6,
-        )
 
+def _finish_plot(figure, axis, path, title, dpi):
     axis.set_aspect("equal", adjustable="box")
     axis.set_xlabel("Local x (m)")
     axis.set_ylabel("Local y (m)")
-    axis.set_title(
-        "Mallala Phase 12A coaching marks - retained representative line\n"
-        f"R6 provisional scenario; finite-roll sensitivity {max_roll_rate_radps:.2f} rad/s")
+    axis.set_title(title)
     axis.legend(fontsize="small", ncol=4)
     figure.tight_layout()
     figure.savefig(path, dpi=dpi)
+    import matplotlib.pyplot as plt
     plt.close(figure)
 
+
+def _write_coaching_overview(path, track, columns, events, *, dpi):
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(13, 10))
+    _draw_base(axis, columns)
+    _draw_start_finish(axis, track)
+    _scatter_events(axis, events, OVERVIEW_EVENT_TYPES)
+    _draw_corner_labels(axis, events)
+    _finish_plot(figure, axis, path,
+                 "Mallala Phase 12A coaching overview — visual review required", dpi)
+
+
+def _write_speed_map(path, track, columns, events, *, dpi):
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    _, _, _, _, bike_x, bike_y = _track_plot_data(columns)
+    points = np.column_stack((bike_x, bike_y))
+    segments = np.stack((points[:-1], points[1:]), axis=1)
+    speed_kph = np.asarray(columns["speed_mps"], dtype=float) * 3.6
+    figure, axis = plt.subplots(figsize=(13, 10))
+    left_x, left_y, right_x, right_y, _, _ = _track_plot_data(columns)
+    axis.plot(left_x, left_y, color="0.65", linewidth=0.5)
+    axis.plot(right_x, right_y, color="0.65", linewidth=0.5)
+    collection = LineCollection(segments, cmap="viridis", linewidth=1.8)
+    collection.set_array(0.5 * (speed_kph[:-1] + speed_kph[1:]))
+    axis.add_collection(collection)
+    figure.colorbar(collection, ax=axis, label="Speed (km/h)")
+    _draw_start_finish(axis, track)
+    _scatter_events(axis, events,
+                    ("braking_onset", "geometric_apex", "positive_drive_pickup"))
+    _draw_corner_labels(axis, events)
+    _finish_plot(figure, axis, path,
+                 "Mallala retained racing line — authoritative solved speed", dpi)
+
+
+def _write_detail(path, columns, events, first, last, *, dpi):
+    import matplotlib.pyplot as plt
+    selected = _corner_events(events, first, last)
+    samples = [event.sample_index for event in selected]
+    if not samples:
+        raise RuntimeError(f"no events found for T{first}-T{last} detail plot")
+    lo, hi = min(samples), max(samples)
+    left_x, left_y, right_x, right_y, bike_x, bike_y = _track_plot_data(columns)
+    sl = slice(lo, hi + 1)
+    figure, axis = plt.subplots(figsize=(12, 9))
+    axis.plot(left_x[sl], left_y[sl], color="0.45", linewidth=0.7, label="Track edge")
+    axis.plot(right_x[sl], right_y[sl], color="0.45", linewidth=0.7)
+    axis.plot(bike_x[sl], bike_y[sl], color="C0", linewidth=1.3,
+              label="Representative racing line")
+    _scatter_events(axis, selected, DETAIL_EVENT_TYPES, annotate=True)
+    _draw_corner_labels(axis, events, first, last)
+    margin = 25.0
+    axis.set_xlim(min(left_x[sl].min(), right_x[sl].min()) - margin,
+                  max(left_x[sl].max(), right_x[sl].max()) + margin)
+    axis.set_ylim(min(left_y[sl].min(), right_y[sl].min()) - margin,
+                  max(left_y[sl].max(), right_y[sl].max()) + margin)
+    _finish_plot(figure, axis, path,
+                 f"Mallala Phase 12A event detail — T{first} to T{last}", dpi)
+
+
+def _write_corner_review_csv(path, columns, corner_regions, mapping):
+    fields = ("corner", "raw_region", "start_index", "end_index", "start_track_s_m",
+              "end_track_s_m", "reference_window_start_m", "reference_window_end_m",
+              "overlap_m")
+    with Path(path).open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        for region, diagnostic in zip(corner_regions, mapping):
+            number, raw_number, overlap, window_start, window_end = diagnostic
+            start, end = region
+            writer.writerow({"corner": f"T{number}", "raw_region": raw_number,
+                             "start_index": start, "end_index": end,
+                             "start_track_s_m": columns["track_s_m"][start],
+                             "end_track_s_m": columns["track_s_m"][end],
+                             "reference_window_start_m": window_start,
+                             "reference_window_end_m": window_end, "overlap_m": overlap})
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
@@ -348,16 +445,23 @@ def main(argv=None):
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trajectory_csv = args.output_dir / "phase12a_representative_trajectory.csv"
     events_csv = args.output_dir / "phase12a_coaching_events.csv"
-    coaching_png = args.output_dir / "phase12a_coaching_racing_line.png"
+    corner_review_csv = args.output_dir / "phase12a_corner_regions_review.csv"
+    visual_paths = {
+        name: args.output_dir / filename for name, filename in VISUAL_OUTPUT_FILENAMES.items()
+    }
     trajectory.write_trajectory_csv(trajectory_csv, columns)
     _write_events_csv(events_csv, events)
-    _write_coaching_png(
-        coaching_png, track, columns, events,
-        max_roll_rate_radps=args.max_roll_rate_radps, dpi=args.plot_dpi)
+    _write_corner_review_csv(corner_review_csv, columns, corner_regions, corner_mapping)
+    _write_coaching_overview(
+        visual_paths["coaching_overview"], track, columns, events, dpi=args.plot_dpi)
+    _write_speed_map(visual_paths["speed_map"], track, columns, events, dpi=args.plot_dpi)
+    for name, first, last in (("detail_T1_T3", 1, 3), ("detail_T4_T6", 4, 6),
+                              ("detail_T7_T9", 7, 9)):
+        _write_detail(visual_paths[name], columns, events, first, last, dpi=args.plot_dpi)
 
     counts = {event_type: 0 for event_type in (
         "local_max_speed", "braking_onset", "maximum_braking", "brake_release",
-        "turn_in", "geometric_apex", "speed_apex", "maximum_lean",
+        "turn_in", "geometric_apex", "maximum_curvature", "speed_apex", "maximum_lean",
         "positive_drive_pickup", "corner_exit", "roll_transition", "gear_shift")}
     for event in events:
         counts[event.event_type] = counts.get(event.event_type, 0) + 1
@@ -379,6 +483,7 @@ def main(argv=None):
     print(f"lap_delta_from_phase11_reference_s={lap_delta:+.9f}")
     print(f"raw_lean_region_count={len(raw_regions)}")
     print(f"corner_count={counts['turn_in']}")
+    print(f"nominal_corner_count={len(corner_regions)}")
     for corner_number, raw_number, overlap, window_start, window_end in corner_mapping:
         print(
             f"corner_mapping_T{corner_number}=raw_region_{raw_number} "
@@ -387,7 +492,12 @@ def main(argv=None):
         print(f"event_count_{event_type}={count}")
     print(f"trajectory_csv={trajectory_csv}")
     print(f"coaching_events_csv={events_csv}")
-    print(f"coaching_racing_line_png={coaching_png}")
+    print(f"corner_regions_review_csv={corner_review_csv}")
+    print(f"coaching_overview_png={visual_paths['coaching_overview']}")
+    print(f"speed_map_png={visual_paths['speed_map']}")
+    print(f"detail_T1_T3_png={visual_paths['detail_T1_T3']}")
+    print(f"detail_T4_T6_png={visual_paths['detail_T4_T6']}")
+    print(f"detail_T7_T9_png={visual_paths['detail_T7_T9']}")
     print("visual_review_required=true")
     print("runoff_export_contract_status=deferred_until_after_visual_event_review")
     return {

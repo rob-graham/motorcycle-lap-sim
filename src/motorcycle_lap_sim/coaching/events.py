@@ -24,6 +24,8 @@ class EventDetectionConfig:
     brake_release_mps2: float = -0.20
     positive_drive_mps2: float = 0.35
     positive_drive_hold_m: float = 4.0
+    landmark_clearance_fraction: float = 0.10
+    landmark_min_clearance_change_m: float = 0.25
 
     def __post_init__(self) -> None:
         values = (
@@ -32,6 +34,8 @@ class EventDetectionConfig:
             self.minimum_corner_length_m,
             self.merge_same_direction_gap_m,
             self.positive_drive_hold_m,
+            self.landmark_clearance_fraction,
+            self.landmark_min_clearance_change_m,
         )
         if not all(math.isfinite(value) and value >= 0.0 for value in values):
             raise ValueError("event geometry thresholds must be finite and non-negative")
@@ -79,6 +83,10 @@ _REQUIRED_KEYS = (
     "longitudinal_acceleration_mps2",
     "path_curvature_1pm",
     "roll_angle_deg",
+    "left_boundary_x_m",
+    "left_boundary_y_m",
+    "right_boundary_x_m",
+    "right_boundary_y_m",
 )
 
 
@@ -253,8 +261,11 @@ def _braking_indices(acceleration, search_start, search_end, config):
 def _first_sustained_positive_drive(acceleration, path_q, start, end, threshold, hold_m):
     if end < start:
         return None
-    for index in range(start, end + 1):
-        if acceleration[index] < threshold:
+    # A pickup is a transition, not simply the first positive sample in an
+    # arbitrarily bounded search interval.  In particular, an already-positive
+    # first sample must not fabricate a GAS landmark.
+    for index in range(start + 1, end + 1):
+        if acceleration[index - 1] >= threshold or acceleration[index] < threshold:
             continue
         target = path_q[index] + hold_m
         final = int(np.searchsorted(path_q, target, side="left"))
@@ -263,6 +274,56 @@ def _first_sustained_positive_drive(acceleration, path_q, start, end, threshold,
         if np.all(acceleration[index:final + 1] >= threshold):
             return index
     return None
+
+
+def _inside_clearance(arrays, start, end, turn_sign):
+    """Euclidean bike clearance to the sampled physical inside boundary."""
+    side = "left" if turn_sign > 0 else "right"
+    dx = arrays["bike_x_m"][start:end + 1] - arrays[f"{side}_boundary_x_m"][start:end + 1]
+    dy = arrays["bike_y_m"][start:end + 1] - arrays[f"{side}_boundary_y_m"][start:end + 1]
+    return np.hypot(dx, dy), side
+
+
+def _rider_landmarks(clearance, start, apex, end, config):
+    """Find outside-to-inside and inside-to-outside geometric transitions.
+
+    The raw lean bounds only constrain the search.  Entry begins after the
+    approach-side clearance maximum once a meaningful fraction of the move to
+    the apex has occurred; exit is the corresponding departure from the apex.
+    A bounded curvature/clearance fallback is deterministic for compound lines
+    without a clean outside-inside-outside pattern.
+    """
+    apex_rel = apex - start
+    entry = clearance[:apex_rel + 1]
+    entry_outer = int(np.argmax(entry))
+    entry_change = float(entry[entry_outer] - entry[-1])
+    required = max(config.landmark_min_clearance_change_m,
+                   config.landmark_clearance_fraction * max(entry_change, 0.0))
+    entry_candidates = np.flatnonzero(entry[entry_outer:] <= entry[entry_outer] - required)
+    if entry_change >= required and entry_candidates.size:
+        turn_in = start + entry_outer + int(entry_candidates[0])
+        turn_rule = "first meaningful movement from approach/outside toward inside edge"
+        turn_confidence = "high"
+    else:
+        turn_in = start + int(np.argmin(entry))
+        turn_rule = "bounded nominal-corner clearance fallback for compound geometry"
+        turn_confidence = "medium"
+
+    departure = clearance[apex_rel:]
+    exit_outer = int(np.argmax(departure))
+    exit_change = float(departure[exit_outer] - departure[0])
+    required = max(config.landmark_min_clearance_change_m,
+                   config.landmark_clearance_fraction * max(exit_change, 0.0))
+    exit_candidates = np.flatnonzero(departure >= departure[0] + required)
+    if exit_change >= required and exit_candidates.size:
+        corner_exit = apex + int(exit_candidates[0])
+        exit_rule = "first meaningful departure from inside edge toward corner exit/outside"
+        exit_confidence = "high"
+    else:
+        corner_exit = apex + exit_outer
+        exit_rule = "bounded nominal-corner clearance fallback for compound geometry"
+        exit_confidence = "medium"
+    return turn_in, corner_exit, turn_rule, exit_rule, turn_confidence, exit_confidence
 
 
 def extract_coaching_events(
@@ -295,9 +356,15 @@ def extract_coaching_events(
     for number, (start, end) in enumerate(regions, start=1):
         corner = f"T{number}"
         local = slice(start, end + 1)
-        geometric_apex = start + int(np.argmax(np.abs(curvature[local])))
+        turn_sign = _region_turn_sign(lean, start, end)
+        inside_clearance, inside_side = _inside_clearance(arrays, start, end, turn_sign)
+        geometric_apex = start + int(np.argmin(inside_clearance))
+        maximum_curvature = start + int(np.argmax(np.abs(curvature[local])))
         speed_apex = start + int(np.argmin(speed[local]))
         max_lean = start + int(np.argmax(np.abs(lean[local])))
+        (turn_in, corner_exit, turn_rule, exit_rule,
+         turn_confidence, exit_confidence) = _rider_landmarks(
+             inside_clearance, start, geometric_apex, end, config)
 
         search_end = max(start, speed_apex)
         braking = _braking_indices(acceleration, previous_exit, search_end, config)
@@ -327,11 +394,16 @@ def extract_coaching_events(
                 "medium"))
 
         events.append(_event(
-            arrays, start, corner, "turn_in",
-            "start of sustained lean region after lean-angle hysteresis", "high"))
+            arrays, turn_in, corner, "turn_in", turn_rule, turn_confidence))
         events.append(_event(
             arrays, geometric_apex, corner, "geometric_apex",
-            "maximum absolute racing-line curvature within the corner region", "high"))
+            f"minimum racing-line clearance to the inside physical {inside_side} track edge "
+            "within the nominal corner", "high"))
+        if maximum_curvature != geometric_apex:
+            events.append(_event(
+                arrays, maximum_curvature, corner, "maximum_curvature",
+                "maximum absolute racing-line curvature within the nominal corner", "high",
+                display=False))
         if speed_apex != geometric_apex:
             events.append(_event(
                 arrays, speed_apex, corner, "speed_apex",
@@ -345,14 +417,14 @@ def extract_coaching_events(
         pickup = _first_sustained_positive_drive(
             acceleration, path_q, speed_apex, next_start,
             config.positive_drive_mps2, config.positive_drive_hold_m)
-        if pickup is not None:
+        if pickup is not None and pickup <= corner_exit:
             events.append(_event(
                 arrays, pickup, corner, "positive_drive_pickup",
-                "first sustained positive longitudinal acceleration after speed apex", "medium"))
+                "below-to-above threshold transition into sustained positive longitudinal "
+                "acceleration after speed apex", "medium"))
         events.append(_event(
-            arrays, end, corner, "corner_exit",
-            "end of sustained lean region after lean-angle hysteresis", "high"))
-        previous_exit = end
+            arrays, corner_exit, corner, "corner_exit", exit_rule, exit_confidence))
+        previous_exit = corner_exit
 
     # Direction-change landmarks are useful rider cues but remain secondary on
     # the map.  Only create one where consecutive corners lean in opposite
@@ -392,12 +464,13 @@ def extract_coaching_events(
         "brake_release": 3,
         "turn_in": 4,
         "geometric_apex": 5,
-        "speed_apex": 6,
-        "maximum_lean": 7,
-        "positive_drive_pickup": 8,
-        "corner_exit": 9,
-        "roll_transition": 10,
-        "gear_shift": 11,
+        "maximum_curvature": 6,
+        "speed_apex": 7,
+        "maximum_lean": 8,
+        "positive_drive_pickup": 9,
+        "corner_exit": 10,
+        "roll_transition": 11,
+        "gear_shift": 12,
     }
     return sorted(events, key=lambda event: (
         event.track_s_m, priority.get(event.event_type, 99), event.corner))
