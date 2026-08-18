@@ -84,6 +84,15 @@ def _heading_vectors(heading):
     return np.column_stack((np.cos(heading), np.sin(heading)))
 
 
+def _valid_metadata():
+    return {
+        "scenario_id": "synthetic",
+        "simulator_commit": "deadbeef",
+        "track_id": "unit_circle",
+        "event_set_id": "synthetic-reviewed-events-v1",
+    }
+
+
 def test_closed_circle_heading_follows_tangent_direction():
     columns = _columns(64)
     heading = derive_closed_path_heading_rad(
@@ -202,12 +211,7 @@ def test_package_has_closed_loop_lengths_provenance_and_strong_read_only_arrays(
         [event],
         track_length_m=columns["_track_length_m"],
         path_length_m=columns["_path_length_m"],
-        scenario_metadata={
-            "scenario_id": "synthetic",
-            "simulator_commit": "deadbeef",
-            "track_id": "unit_circle",
-            "event_set_id": "synthetic-reviewed-events-v1",
-        },
+        scenario_metadata=_valid_metadata(),
         warnings=("synthetic data",),
     )
     assert package.interface_version == RUNOFF_INTERFACE_VERSION
@@ -236,6 +240,38 @@ def test_package_requires_identity_and_event_set_metadata():
             track_length_m=columns["_track_length_m"],
             path_length_m=columns["_path_length_m"],
             scenario_metadata={"scenario_id": "x", "simulator_commit": "y", "track_id": "z"},
+        )
+
+
+@pytest.mark.parametrize("field", ["scenario_id", "simulator_commit", "track_id", "event_set_id"])
+@pytest.mark.parametrize("bad_value", [None, "", "   ", 123, 1.5, object()])
+def test_required_metadata_identity_must_be_nonempty_string(field, bad_value):
+    columns = _columns()
+    clean = _clean_columns(columns)
+    metadata = _valid_metadata()
+    metadata[field] = bad_value
+    with pytest.raises(ValueError, match="required scenario metadata"):
+        build_runoff_input_package(
+            clean,
+            [],
+            track_length_m=columns["_track_length_m"],
+            path_length_m=columns["_path_length_m"],
+            scenario_metadata=metadata,
+        )
+
+
+def test_nonstring_optional_metadata_is_rejected_without_coercion():
+    columns = _columns()
+    clean = _clean_columns(columns)
+    metadata = _valid_metadata()
+    metadata["motorcycle_config_id"] = None
+    with pytest.raises(ValueError, match="metadata values"):
+        build_runoff_input_package(
+            clean,
+            [],
+            track_length_m=columns["_track_length_m"],
+            path_length_m=columns["_path_length_m"],
+            scenario_metadata=metadata,
         )
 
 
