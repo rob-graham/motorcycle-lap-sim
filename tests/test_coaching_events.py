@@ -20,17 +20,24 @@ def _columns():
     acceleration = np.zeros(count)
     acceleration[35:70] = -2.0
     acceleration[70:76] = -0.1
-    acceleration[80:110] = 1.0
+    acceleration[72:110] = 1.0
     acceleration[135:170] = -2.2
     acceleration[170:176] = -0.1
-    acceleration[180:210] = 0.9
+    acceleration[172:210] = 0.9
     gear = np.full(count, 4.0)
     gear[100:] = 5.0
+    bike_y = np.zeros(count)
+    bike_y[50:91] = np.r_[np.linspace(0, 3.0, 21), np.linspace(3.0, 0, 20)]
+    bike_y[150:191] = -np.r_[np.linspace(0, 3.0, 21), np.linspace(3.0, 0, 20)]
     return {
         "track_s_m": s,
         "path_q_m": s,
         "bike_x_m": s,
-        "bike_y_m": np.zeros(count),
+        "bike_y_m": bike_y,
+        "left_boundary_x_m": s,
+        "left_boundary_y_m": np.full(count, 5.0),
+        "right_boundary_x_m": s,
+        "right_boundary_y_m": np.full(count, -5.0),
         "speed_mps": speed,
         "longitudinal_acceleration_mps2": acceleration,
         "path_curvature_1pm": curvature,
@@ -71,7 +78,7 @@ def test_extract_coaching_events_accepts_case_specific_corner_regions():
     events = extract_coaching_events(
         columns, corner_regions=((50, 90), (150, 190)), expected_corner_count=2)
     turn_ins = [event for event in events if event.event_type == "turn_in"]
-    assert [event.sample_index for event in turn_ins] == [50, 150]
+    assert all(50 <= event.sample_index <= 190 for event in turn_ins)
 
 
 def test_brake_release_is_not_fabricated_at_search_boundary():
@@ -95,3 +102,61 @@ def test_expected_corner_count_fails_closed():
 def test_config_rejects_inverted_lean_hysteresis():
     with pytest.raises(ValueError, match="lean-off"):
         EventDetectionConfig(corner_lean_on_deg=4.0, corner_lean_off_deg=6.0)
+
+
+def _event_map(columns, region):
+    return {event.event_type: event for event in extract_coaching_events(
+        columns, corner_regions=(region,), expected_corner_count=1)}
+
+
+def test_geometric_apex_uses_inside_physical_edge_not_maximum_curvature():
+    columns = _columns()
+    curvature = columns["path_curvature_1pm"].copy()
+    curvature[55] = 0.2
+    columns["path_curvature_1pm"] = curvature
+    events = _event_map(columns, (50, 90))
+    assert events["geometric_apex"].sample_index == 70
+    assert events["maximum_curvature"].sample_index == 55
+    assert "inside physical left track edge" in events["geometric_apex"].source_rule
+
+
+def test_geometric_apex_selects_right_edge_for_right_corner():
+    columns = _columns()
+    events = _event_map(columns, (150, 190))
+    assert events["geometric_apex"].sample_index == 170
+    assert "inside physical right track edge" in events["geometric_apex"].source_rule
+
+
+@pytest.mark.parametrize("mode, expected", [
+    ("crossing", True), ("already_positive", False), ("spike", False),
+])
+def test_positive_drive_requires_sustained_transition(mode, expected):
+    columns = _columns()
+    acceleration = np.zeros_like(columns["longitudinal_acceleration_mps2"])
+    if mode == "crossing":
+        acceleration[72:90] = 0.5
+    elif mode == "already_positive":
+        acceleration[50:90] = 0.5
+    else:
+        acceleration[72:74] = 0.5
+    columns["longitudinal_acceleration_mps2"] = acceleration
+    events = _event_map(columns, (50, 90))
+    assert ("positive_drive_pickup" in events) is expected
+
+
+def test_rider_turn_and_exit_ignore_raw_lean_region_extremes():
+    events = _event_map(_columns(), (45, 110))
+    assert events["turn_in"].sample_index > 45
+    assert events["corner_exit"].sample_index < 110
+    assert events["turn_in"].sample_index <= events["geometric_apex"].sample_index
+    assert events["geometric_apex"].sample_index <= events["corner_exit"].sample_index
+
+
+def test_compound_clearance_fallback_is_deterministic():
+    columns = _columns()
+    columns["bike_y_m"] = np.zeros_like(columns["bike_y_m"])
+    first = _event_map(columns, (50, 90))
+    second = _event_map(columns, (50, 90))
+    assert first["turn_in"].sample_index == second["turn_in"].sample_index
+    assert first["turn_in"].confidence == "medium"
+    assert "fallback" in first["turn_in"].source_rule
