@@ -1,0 +1,91 @@
+# Simulator-to-run-off input contract
+
+**Status:** Phase 12B internal prototype  
+**Interface version:** `0.1.0`
+
+## Purpose
+
+This contract defines the simulator-side hand-off to a separate run-off calculation package. It transfers solved trajectory state and traceable candidate departure states. Run-off calculation assumptions remain downstream and are not embedded in the lap simulator.
+
+The current ownership boundary is:
+
+- `motorcycle-lap-sim` owns solved trajectory state, simulator track-edge geometry, event provenance, and candidate departure-state extraction;
+- the separate run-off package will own off-track surface parameters, terrain propagation, stopping criteria, protection geometry, uncertainty treatment, and standards-comparison profiles.
+
+Candidate departure seeds are engineering starting points. They do not assert that a departure will occur there or that a selected point is the controlling case.
+
+## Coordinates and chainage
+
+Version `0.1.0` uses local Cartesian metres. It does not invent a CRS, world transform, elevation, grade or banking when those data are not implemented.
+
+Two distance coordinates are retained:
+
+- `track_s_m`: reference-track parameter used to construct and sample the racing line;
+- `path_q_m`: arc length along the solved racing line.
+
+The package also requires explicit `track_length_m` and `path_length_m`. Samples follow the closed-loop convention **duplicated endpoint omitted**, so the final stored chainage is less than the corresponding total length and the total length supplies the wrap segment across start/finish.
+
+`path_heading_rad` is derived from the solved closed racing-line coordinates using a periodic three-point derivative with respect to `path_q_m`. The unequal-spacing derivative uses the wrapped path length at start/finish; it therefore does not rely on uniform trajectory sampling.
+
+## Required trajectory state
+
+The initial hand-off requires sample index, both chainages, racing-line x/y, physical left/right track-edge x/y, speed, longitudinal acceleration, signed lateral acceleration, path curvature, demanded lean angle, the Level-1 model roll-rate term, and derived path heading.
+
+Gear, RPM and selected model-limit flags may be included when present. Their presence is diagnostic and does not make them run-off criteria.
+
+Required arrays are equal-length defensive copies. Chainages start at zero and increase strictly, sample indices are contiguous integer values from zero, and numeric/string array storage is backed by immutable bytes so NumPy writes cannot simply be re-enabled by the consumer.
+
+The interface performs structural consistency checks. It does **not** claim to re-prove complete track geometry correctness (for example, swapped boundaries or survey-grade spatial consistency); those matters remain tied to upstream geometry provenance and retained-case integration checks.
+
+## Scenario and event-set identity
+
+Each package must include at least:
+
+- `scenario_id`;
+- `simulator_commit`;
+- `track_id`; and
+- `event_set_id`.
+
+Additional metadata may record motorcycle configuration identity, retained-line identity, handling scenario, input hashes and geometry version. Warnings are transferred separately.
+
+`event_set_id` is the minimum provenance hook distinguishing the event set used for candidate extraction from arbitrary caller-created event objects. For the retained Mallala case, the later integration export should use an identifier/hash tied to the Phase 12A generated event artefact. This interface still validates individual event structure and state correspondence; it does not by itself certify that an arbitrary event set has undergone human review.
+
+## Candidate departure seeds
+
+Version `0.1.0` maps only supported event semantics with a direct downstream engineering use:
+
+| Event | Candidate seed type |
+| --- | --- |
+| `local_max_speed` | `missed_braking_candidate` |
+| `braking_onset` | `upright_overrun_candidate` |
+| `turn_in` | `entry_lowside_turn_in_candidate` |
+| `geometric_apex` | `entry_lowside_apex_candidate` |
+| `positive_drive_pickup` | `exit_highside_candidate` |
+
+Each seed records the source event type, source rule, confidence and exact trajectory sample state. The event sample index must be a finite integer-valued scalar; fractional, boolean, string, non-finite and array-like indices fail closed.
+
+Event copies of chainage, position, speed, longitudinal acceleration, curvature and lean are checked against the supplied trajectory. A finite event roll-rate copy is also checked against the trajectory roll-rate field. `NaN` roll rate is the one explicit missing-value convention: it means the event did not retain a roll-rate value, so the trajectory field remains authoritative. Physical seed values are always taken from the validated trajectory, not copied from the event object.
+
+The mapping deliberately excludes optimiser spread, optimiser control points and capability-limit classifications as automatic departure criteria.
+
+## Explicit non-goals of version 0.1.0
+
+The first interface does not calculate off-track travel, assign surface coefficients, implement uncertainty distributions, reproduce the published MA comparison method, or generate the standards-comparison tangential envelope. Those are separate later increments with their own versioned assumptions and tests.
+
+## Initial stopping-criterion decision for the run-off core
+
+The first deterministic physical run-off calculations will calculate stopping distance to `0.0 m/s` (0 km/h). This is the baseline stopping criterion for initial rider-slide, motorcycle-slide and other deterministic propagation models unless a scenario explicitly states otherwise.
+
+The provisional 24 km/h value considered in the earlier internal run-off working document is **not** the default stopping criterion. It was considered as a possible residual-speed limit for reaching an energy-absorbing protection system rather than as the normal definition of required run-off distance, and it has not been sufficiently established for production use.
+
+Residual-speed-at-barrier criteria, including any future 24 km/h case, must therefore be implemented later as separately named and versioned barrier/protection scenarios with explicit provenance, justification and sensitivity analysis. They must not silently shorten the baseline run-off-to-rest calculation.
+
+## Next increments
+
+After review of this contract, the next step is a bounded retained-Mallala Phase 12A integration export using the retained trajectory and generated event set. That runtime/integration check should verify total-length and wrap semantics, event-set provenance, candidate counts/types and representative fields before the interface is treated as frozen.
+
+After that, begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. The first physical calculations will use a final speed of zero. Surface/terrain propagation, protection-geometry intersection and any non-zero barrier residual-speed criteria will then be added as separately reviewable increments, followed by standards comparison, georeferencing and 3D terrain fields.
+
+## Interpretation boundary
+
+This interface is `INTERNAL-PROTOTYPE` and `NOT-EXTERNALLY-ACCEPTED`. It is a traceable engineering data contract, not a claim of track compliance, homologation, certification, insurance acceptance, or rider instruction.
