@@ -23,7 +23,9 @@ Generic candidate corner regions are derived from demanded lean angle with hyste
 
 The first retained-line Mallala execution produced 12 generic lean regions rather than nine. Inspection showed that the extra regions were not unmerged compound corners: they were sustained low-curvature setup/straight-line lean regions at the lap start, before T5 and across the lap-end/start-finish transition. The nine intended T1-T9 regions were already present among the 12 candidates.
 
-For the current Mallala integration command, generic regions are therefore post-filtered against the current reference-track corner geometry. The nine reference windows are defined from the analytic primitive groups for T1-T9, with T3, T6 and T7 represented by their contiguous compound arc groups. For each reference window, the command selects the unique detected lean region with the largest positive chainage overlap. It fails closed if any T1-T9 window has no detected region or if one detected region would map to more than one reference corner.
+For the current Mallala integration command, generic regions are therefore consolidated against the current reference-track corner geometry. The nine nominal corners are defined from the analytic primitive groups for T1-T9, with T3, T6 and T7 represented by their contiguous compound arc groups. Each corner owns its grouped arcs plus half of the neighbouring approach and exit straights, so racing-line lean need not lie exactly inside a centreline arc. A raw region is assigned by maximum chainage overlap where its turn direction agrees with the nominal corner; multiple raw regions assigned to one corner are merged. Ambiguous assignments and missing nominal corners fail closed. Direction/ownership mismatches in the bounded Mallala command remain explicit review rows rather than disappearing silently.
+
+The command writes `phase12a_corner_regions_review.csv`. Each raw region records its nominal assignment (or explicit unassigned status), raw and consolidated bounds, turn sign, peak absolute lean and curvature, assignment rule and confidence. Event extraction consumes exactly the nine consolidated T1-T9 regions.
 
 This geometry-overlap step is intentionally case-specific. It avoids introducing a generic curvature cutoff that could incorrectly reject a real fast/shallow corner such as Mallala T4, and it does not change the generic lean-hysteresis detector for other circuits. The Mallala command still fails closed unless exactly nine mapped corner regions are supplied to event extraction.
 
@@ -81,7 +83,9 @@ The Phase 12A racing-line image is intentionally presentation-focused. It contai
 - physical track edges;
 - the retained representative racing line;
 - start/finish; and
-- rider-facing coaching marks for braking onset, brake release, turn-in, geometric apex, positive-drive pickup and corner exit.
+- rider-facing coaching marks for braking onset, turn-in, geometric apex, positive-drive pickup and corner exit.
+
+Brake release remains in the engineering event CSV but is omitted from the whole-track image to reduce label crowding.
 
 Labels show the corner, event abbreviation, speed, and where useful gear or demanded lean.
 
