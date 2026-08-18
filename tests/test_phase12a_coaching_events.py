@@ -59,7 +59,36 @@ def test_visual_output_names_are_the_phase12a_review_suite():
         "phase12a_coaching_overview.png", "phase12a_speed_map.png",
         "phase12a_T1_T3_detail.png", "phase12a_T4_T6_detail.png",
         "phase12a_T7_T9_detail.png",
+        "phase12a_limit_state_map.png",
     }
+
+
+def test_display_names_and_detail_callouts_are_grouped():
+    module = _module()
+    assert module.EVENT_ABBREVIATIONS["positive_drive_pickup"] == "DRIVE"
+    assert module.EVENT_ABBREVIATIONS["speed_apex"] == "VMIN"
+    assert "maximum_braking" in module.DETAIL_EVENT_TYPES
+
+    from types import SimpleNamespace
+    events = [
+        SimpleNamespace(corner="T1", event_type="geometric_apex", track_s_m=100.0),
+        SimpleNamespace(corner="T1", event_type="speed_apex", track_s_m=102.0),
+        SimpleNamespace(corner="T1", event_type="maximum_curvature", track_s_m=103.0),
+    ]
+    rows = module._detail_callout_rows(events)
+    assert len(rows) == 1
+    assert "APEX/VMIN/K-MAX" in rows[0]
+
+
+def test_limit_state_requires_capability_utilisation_and_trail_requires_brake_force():
+    module = _module()
+    state = module._classify_limit_state(2.0, 5.0, 8.0, "wheelie", "stoppie", -0.2)
+    assert state[0] == "sub-max drive"
+    state = module._classify_limit_state(4.95, 5.0, 8.0, "wheelie", "stoppie", -0.2)
+    assert state[0] == "wheelie-limited drive"
+    assert not module._is_trail_braking_proxy(20.0, 0.0)
+    assert not module._is_trail_braking_proxy(0.0, 500.0)
+    assert module._is_trail_braking_proxy(20.0, 500.0)
 
 
 def test_mallala_reference_filter_rejects_three_straight_setup_regions():

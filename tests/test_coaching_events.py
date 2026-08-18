@@ -160,3 +160,68 @@ def test_compound_clearance_fallback_is_deterministic():
     assert first["turn_in"].sample_index == second["turn_in"].sample_index
     assert first["turn_in"].confidence == "medium"
     assert "fallback" in first["turn_in"].source_rule
+
+
+def test_turn_uses_dominant_roll_in_before_curvature_peak_not_clearance_move():
+    columns = _columns()
+    # Hold the line away from the inside-edge movement until after the signed
+    # lean/curvature build is established.
+    columns["bike_y_m"][50:66] = 0.0
+    columns["path_curvature_1pm"][65] = 0.2
+    events = _event_map(columns, (50, 90))
+    assert events["turn_in"].sample_index < 65
+    assert events["turn_in"].sample_index < events["maximum_curvature"].sample_index
+    assert "demanded-lean/curvature build" in events["turn_in"].source_rule
+
+
+def test_exit_waits_for_apex_vmin_kmax_and_substantial_recovery_unwind():
+    columns = _columns()
+    columns["path_curvature_1pm"][75] = 0.2
+    # A tiny apex departure precedes the real track-out.
+    columns["bike_y_m"][70:78] = np.linspace(3.0, 2.9, 8)
+    columns["bike_y_m"][78:91] = np.linspace(2.9, 0.0, 13)
+    events = _event_map(columns, (50, 90))
+    completion = max(events[name].sample_index for name in
+                     ("geometric_apex", "speed_apex", "maximum_curvature"))
+    assert events["corner_exit"].sample_index >= completion
+    assert events["corner_exit"].sample_index > 78
+
+
+def test_release_is_final_sustained_recovery_after_renewed_braking():
+    columns = _columns()
+    acceleration = np.zeros_like(columns["longitudinal_acceleration_mps2"])
+    acceleration[35:45] = -2.0
+    acceleration[45:51] = 0.0       # early sustained-looking recovery
+    acceleration[51:61] = -1.8      # renewed meaningful pulse
+    acceleration[61:] = 0.0
+    columns["longitudinal_acceleration_mps2"] = acceleration
+    events = _event_map(columns, (50, 90))
+    assert events["brake_release"].sample_index == 61
+    assert "final sustained" in events["brake_release"].source_rule
+
+
+def test_drive_detects_crossing_at_search_start_and_is_not_exit_gated():
+    columns = _columns()
+    acceleration = np.zeros_like(columns["longitudinal_acceleration_mps2"])
+    acceleration[71] = -0.2
+    acceleration[72:] = 0.8
+    columns["longitudinal_acceleration_mps2"] = acceleration
+    events = _event_map(columns, (50, 90))
+    assert events["positive_drive_pickup"].sample_index == 72
+
+    # Force EXIT to the corner bound; DRIVE remains independently detectable.
+    columns["bike_y_m"][:] = 0.0
+    events = _event_map(columns, (50, 90))
+    assert events["positive_drive_pickup"].sample_index == 72
+
+
+def test_drive_rejects_early_patch_before_sustained_braking_and_uses_final_crossing():
+    columns = _columns()
+    acceleration = np.zeros_like(columns["longitudinal_acceleration_mps2"])
+    acceleration[71] = -0.2
+    acceleration[72:80] = 0.8
+    acceleration[80:87] = -1.0
+    acceleration[87:] = 0.8
+    columns["longitudinal_acceleration_mps2"] = acceleration
+    events = _event_map(columns, (50, 90))
+    assert events["positive_drive_pickup"].sample_index == 87

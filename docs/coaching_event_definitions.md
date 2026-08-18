@@ -36,14 +36,14 @@ For each accepted nominal corner the implementation records:
 - `local_max_speed`: maximum speed between the previous corner exit and braking onset, or turn-in if no strong braking episode is detected;
 - `braking_onset`: beginning of sustained deceleration before a strong-braking sample;
 - `maximum_braking`: minimum longitudinal acceleration in the approach/corner search window;
-- `brake_release`: first actual recovery above the release threshold after maximum braking; no release event is emitted merely because the search window ended;
-- `turn_in`: first meaningful movement from the approach/outside condition toward the inside edge, bounded by the accepted raw region and nominal-corner ownership; a traceable medium-confidence bounded fallback is used for compound geometry;
+- `brake_release` (**REL**): final sustained acceleration-derived departure from the braking regime after the last meaningful braking pulse. It is not measured brake-lever release; no event is emitted merely because the search window ended;
+- `turn_in` (**TURN**): onset of the dominant corner-direction demanded-lean or signed-curvature build before the maximum-curvature/apex phase, bounded by accepted nominal-corner ownership. If no clean build is identifiable, a deterministic signed-curvature/demanded-lean peak fallback is recorded at medium confidence;
 - `geometric_apex`: minimum Euclidean racing-line clearance to the sampled physical inside track edge, with turn direction selecting left or right;
-- `maximum_curvature`: maximum absolute racing-line curvature, retained as a separate engineering event;
-- `speed_apex`: minimum speed within the corner region, retained separately when it differs from the geometric apex;
+- `maximum_curvature` (**K-MAX**): maximum absolute racing-line curvature, retained as a separate engineering event;
+- `speed_apex` (**VMIN**): minimum speed within the corner region, retained separately when it differs from the geometric apex;
 - `maximum_lean`: maximum absolute demanded lean, retained separately when it differs from the other apex events;
-- `positive_drive_pickup`: a real below-to-above positive-drive threshold crossing after the speed apex that remains above threshold for the hold distance; an already-positive search start or transient spike emits no event;
-- `corner_exit`: first meaningful departure from the inside-edge/apex condition toward the exit/outside, bounded by nominal ownership rather than residual low-angle lean;
+- `positive_drive_pickup` (**DRIVE**): a real below-to-above longitudinal-acceleration threshold crossing from VMIN/final release toward the next approach boundary. The crossing may occur at the search-start sample, must satisfy the positive hold distance, and is rejected if followed by sustained meaningful braking. An already-positive start emits no event. DRIVE is not throttle position;
+- `corner_exit` (**EXIT**): substantial post-apex track-out, requiring inside-edge clearance recovery together with demanded-lean and signed-curvature unwind. It cannot precede the maximum of APEX, VMIN and K-MAX in a normal corner. The bounded nominal-corner end is the explicit medium-confidence fallback;
 - `roll_transition`: minimum absolute demanded lean between consecutive opposite-direction corner regions; and
 - `gear_shift`: solver gear-number change between adjacent samples.
 
@@ -55,6 +55,11 @@ Initial longitudinal thresholds are explicit, replaceable prototype values:
 - positive drive >= +0.35 m/s^2, sustained over at least 4 m.
 
 These thresholds are event-detection parameters. They are not motorcycle performance limits or safety criteria.
+
+BRK is the onset of sustained acceleration-derived deceleration preceding a
+strong-braking sample. MAX-BRK is the minimum longitudinal acceleration in the
+accepted approach/corner braking sequence. Neither BRK, MAX-BRK nor REL is a
+direct brake-pressure or brake-lever measurement.
 
 ## Event record
 
@@ -79,13 +84,20 @@ GIS coordinates are not added in Phase 12A because the current Mallala geometry 
 
 ## Phase 12A visual-validation suite
 
-All five figures consume the same solved retained trajectory and extracted event set; they do not re-solve or alter the representative line.
+All six figures consume the same solved retained trajectory and extracted event set; they do not re-solve or alter the representative line.
 
-- `phase12a_coaching_overview.png` is the clean whole-lap rider overview. It shows only BRK, TURN, geometric APEX, GAS (when present), and EXIT; REL and engineering events are deliberately absent.
-- `phase12a_speed_map.png` continuously colours the racing line by authoritative solved speed in km/h, with only small BRK/APEX/GAS marks.
-- `phase12a_T1_T3_detail.png`, `phase12a_T4_T6_detail.png`, and `phase12a_T7_T9_detail.png` provide equal-scale regional engineering review. They include REL where present and distinguish speed apex and maximum curvature from geometric apex. Their extents derive automatically from the selected event/corner spans with a fixed spatial margin.
+- `phase12a_coaching_overview.png` is the clean whole-lap rider overview. It shows only BRK, TURN, geometric APEX, DRIVE (when present), and EXIT; REL and engineering events are deliberately absent.
+- `phase12a_speed_map.png` continuously colours the racing line by authoritative solved speed in km/h, with only small BRK/APEX/DRIVE marks.
+- `phase12a_T1_T3_detail.png`, `phase12a_T4_T6_detail.png`, and `phase12a_T7_T9_detail.png` provide equal-scale regional engineering review. They include MAX-BRK and REL where present and distinguish VMIN and K-MAX from geometric APEX. Nearby events are combined into deterministic side-table callouts rather than overlapping map labels.
+- `phase12a_limit_state_map.png` is an engineering-only diagnostic. At each solved sample it recomputes existing forward and braking capabilities and distinguishes wheelie-, stoppie-, tyre- and engine/power-limited operation only when solved acceleration is close to that capability. Otherwise it reports sub-max drive, sub-max deceleration, or coast/passive resistance. These are model capability diagnostics, not measured controls or proof that a physical motorcycle reached a limit. `phase12a_limit_state.csv` preserves the auditable sample classifications and utilisations.
 
-The generic 6/4-degree lean hysteresis remains a raw candidate-region detector. It does not directly define rider-facing TURN or EXIT. Mallala's nominal-corner ownership and T3/T6/T7 compound grouping remain explicitly case-specific; the event landmarks inside those bounded searches are still derived from trajectory geometry. Missing GAS, braking, release, or engineering events are represented by absence rather than fabricated fallback locations.
+The limit-state map also marks a **trail-braking proxy** where demanded lean is
+significant and the braking force required by solved deceleration exceeds
+passive aerodynamic drag plus rolling resistance. This is a simulation-derived
+proxy, not measured brake pressure. Negative acceleration while leaned is not
+by itself sufficient.
+
+The generic 6/4-degree lean hysteresis remains a raw candidate-region detector. It does not directly define rider-facing TURN or EXIT. Mallala's nominal-corner ownership and T3/T6/T7 compound grouping remain explicitly case-specific; the event landmarks inside those bounded searches are still derived from trajectory geometry. Missing DRIVE, braking, release, or engineering events are represented by absence rather than fabricated fallback locations.
 
 Optimiser controls, optimiser spread/envelopes, corridor and centreline diagnostics, convergence metrics, and dense engineering annotations remain excluded from the clean overview. Gear/state/lean/roll-rate coloured maps, polished corner sheets, and richer chainage diagnostics are prospective Phase 12B work, not Phase 12A deliverables.
 
