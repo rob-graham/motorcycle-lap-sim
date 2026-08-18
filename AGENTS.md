@@ -20,6 +20,7 @@
 
 - Before non-trivial work, read `docs/project_context.md`, `docs/system_spec.md`, and `docs/development_scope_review.md`, plus the most relevant phase/method document for the task.
 - Repository code, tests, configuration, cases, and current repository documentation define implemented behaviour. External roadmap documents define intended direction, not implemented capability.
+- Current `main` repository documentation and `AGENTS.md` govern current implementation state, phase status, and the next repository task. ChatGPT Project snapshot files remain useful for wider roadmap direction unless deliberately superseded by a current project decision.
 - Do not infer roadmap phase status from historical script names alone. Some repository `phase10` scripts implement work now grouped under project Phase 9.
 - The Phase 9/10 Mallala validation/runtime workflow is reproducible and Phase 10 is closed for the present sequence with substantial calibration explicitly deferred for identifiability reasons; see `docs/phase10_mallala_closure.md`.
 - Phase 11 optimisation assurance is closed for the present Mallala sequence. The retained representative is `reduced_reoptimised_51` at 71.396583646 s on the 0.125 m authoritative Python common grid; see `docs/phase11_optimisation_assurance_closure.md`.
@@ -30,10 +31,15 @@
 
 - Start each new task from current `main` unless explicitly instructed otherwise.
 - Use one focused branch/PR per task. Do not continue development on stale, superseded, or rejected PR branches.
+- Every task must explicitly name one Implementer and one independent Reviewer. Either ChatGPT or Codex may fill either role, but the same participant must not fill both roles for a non-trivial change.
+- Use one active Implementer per task branch. Reviewers inspect and comment; they do not make competing edits unless the Owner explicitly transfers the Implementer role.
+- For cloud or sandbox agents, the supplied starting commit SHA is the authoritative task identity. The sandbox's internal branch name need not match the GitHub branch name.
 - If an old branch contains a potentially useful fix, first reproduce the failure on current `main`; then re-propose the smallest fix against current `main` with a regression test.
-- ChatGPT may implement code and documentation. Codex review should be used as an independent review step for non-trivial code changes when practical.
+- ChatGPT and Codex may implement code and documentation. When ChatGPT has connected GitHub access, it should inspect the actual repository, pull request, and diff directly; pasted diffs and logs are fallback evidence.
 - Review the actual diff and executable behaviour, not only the implementer's explanation. Do not assume a generated change is correct because its unit tests pass.
+- If the Implementer's environment cannot push or create a pull request, it must return the verified patch/diff, starting SHA, resulting commit SHA if one exists, and exact test evidence, and state that the Owner must apply/push it. Never fabricate a pull-request URL.
 - After a PR is merged or deliberately closed, delete its head branch unless there is a documented reason to retain it.
+- Detailed procedures and command templates are in `docs/agent_collaboration_workflow.md`.
 
 ## Verification before merge
 

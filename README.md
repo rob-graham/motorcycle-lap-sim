@@ -9,6 +9,7 @@ For review, start with:
 - [simulation project context and source hierarchy](docs/project_context.md);
 - [system specification and implemented phase status](docs/system_spec.md);
 - [development scope and stale-branch decisions](docs/development_scope_review.md);
+- [Owner, ChatGPT and Codex collaboration workflow](docs/agent_collaboration_workflow.md);
 - [Phase 9 Mallala numerical baseline freeze](docs/phase9_baseline_freeze.md); and
 - [Mallala R6 telemetry integrity assessment](docs/mallala_r6_telemetry_integrity.md).
 
