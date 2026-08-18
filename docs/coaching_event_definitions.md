@@ -25,6 +25,8 @@ The first retained-line Mallala execution produced 12 generic lean regions rathe
 
 For the current Mallala integration command, generic regions are consolidated against the current reference-track corner geometry. The nine nominal windows are defined from the analytic primitive groups for T1-T9, with T3, T6 and T7 represented by their contiguous compound arc groups. Non-overlapping ownership intervals extend those nominal windows to the midpoints of adjacent straights (and to the lap boundary for T1/T9). Raw regions are assigned by greatest ownership overlap only when their demanded-lean direction matches the nominal primitive direction. Multiple direction-consistent fragments may consolidate into one compound corner. Equal ownership ambiguity and any nominal corner without a direction-valid overlapping region fail closed; rejected/unassigned raw regions remain explicit in `phase12a_corner_regions_review.csv`.
 
+The review CSV contains one provenance row per raw region. It records the raw and consolidated bounds, nominal owner when assigned, turn sign, peak absolute lean and curvature, nominal/ownership windows and overlap, assignment rule, status and confidence. Unassigned setup regions therefore remain inspectable rather than disappearing from the nominal-corner result.
+
 This geometry-overlap step is intentionally case-specific. It avoids introducing a generic curvature cutoff that could incorrectly reject a real fast/shallow corner such as Mallala T4, and it does not change the generic lean-hysteresis detector for other circuits. The Mallala command still fails closed unless exactly nine mapped corner regions are supplied to event extraction.
 
 ## Event rules

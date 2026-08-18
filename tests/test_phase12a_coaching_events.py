@@ -19,6 +19,14 @@ def _module():
     return module
 
 
+def _assignment_columns(track_s, lean):
+    return {
+        "track_s_m": np.asarray(track_s, dtype=float),
+        "roll_angle_deg": np.asarray(lean, dtype=float),
+        "path_curvature_1pm": np.zeros_like(track_s, dtype=float),
+    }
+
+
 def test_parser_defaults_match_retained_phase11_scenario(tmp_path):
     module = _module()
     args = module.build_parser().parse_args(["representative.csv", str(tmp_path)])
@@ -57,13 +65,20 @@ def test_visual_output_names_are_the_phase12a_review_suite():
 def test_mallala_reference_filter_rejects_three_straight_setup_regions():
     module = _module()
     track = Track.from_yaml(TRACK)
+    track_s = np.arange(2558, dtype=float)
     raw_regions = (
-        (170, 230), (295, 455),
-        (760, 825), (835, 970),  # two raw regions owned by compound T3
-        (1150, 1430), (1620, 1680),
-        (1710, 1810), (1820, 1970),  # compound T6
-        (2220, 2260), (2270, 2310),  # compound T7
-        (2315, 2390), (2395, 2460),
+        (0, 66),
+        (80, 263),
+        (269, 518),
+        (694, 1020),
+        (1087, 1493),
+        (1507, 1568),
+        (1574, 1706),
+        (1711, 2147),
+        (2155, 2314),
+        (2319, 2386),
+        (2390, 2524),
+        (2533, 2557),
     )
     lean = np.zeros_like(track_s)
     signs = module._mallala_corner_turn_signs(track)
@@ -79,28 +94,15 @@ def test_mallala_reference_filter_rejects_three_straight_setup_regions():
         owner = int(np.argmax(overlaps))
         lean[start:end + 1] = -10.0 * signs[owner]
 
-    selected, diagnostics = module._select_mallala_corner_regions(
-        track, {"track_s_m": track_s, "roll_angle_deg": lean}, raw_regions)
+    selected, review = module._consolidate_mallala_corner_regions(
+        track, _assignment_columns(track_s, lean), raw_regions, allow_unassigned=True)
 
     assert selected == tuple(raw_regions[index] for index in (1, 2, 3, 4, 6, 7, 8, 9, 10))
-    assigned = [item for item in diagnostics if "corner" in item]
-    assert tuple(item["raw_regions"] for item in assigned) == (
-        (2,), (3,), (4,), (5,), (7,), (8,), (9,), (10,), (11,))
-    assert {item["raw_region"] for item in diagnostics if "corner" not in item} == {1, 6, 12}
+    assert [row["nominal_corner"] for row in review if row["status"] == "assigned"] == [
+        "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9"]
+    assert {row["raw_region_index"] for row in review if row["status"] == "unassigned"} == {
+        1, 6, 12}
     assert len(selected) == module.EXPECTED_MALLALA_CORNERS
-    assert selected[2] == (760, 970)
-    assert selected[5] == (1710, 1970)
-    assert selected[6] == (2220, 2310)
-    assert [row["nominal_corner"] for row in review].count("T3") == 2
-
-
-def test_mallala_unassigned_raw_region_fails_clearly():
-    module = _module()
-    track = Track.from_yaml(TRACK)
-    raw_regions = ((170, 230),)
-    columns = _assignment_columns(track, raw_regions, (1,))  # T1 turns negative
-    with np.testing.assert_raises_regex(ValueError, "raw region 1 is unassigned"):
-        module._consolidate_mallala_corner_regions(track, columns, raw_regions)
 
 
 def test_mallala_corner_windows_follow_reference_primitive_groups():
@@ -108,11 +110,6 @@ def test_mallala_corner_windows_follow_reference_primitive_groups():
     track = Track.from_yaml(TRACK)
     windows = module._mallala_corner_windows(track)
 
-    assert tuple(f"T{i}" for i in range(1, len(module.MALLALA_CORNER_PRIMITIVE_GROUPS) + 1)) == tuple(
-        f"T{i}" for i in range(1, 10))
-    assert module.MALLALA_CORNER_PRIMITIVE_GROUPS[2] == (5, 6, 7)
-    assert module.MALLALA_CORNER_PRIMITIVE_GROUPS[5] == (13, 14)
-    assert module.MALLALA_CORNER_PRIMITIVE_GROUPS[6] == (16, 17)
     assert len(windows) == 9
     assert np.allclose(windows[0], (178.593280835, 217.55908050670806), atol=1e-9)
     assert np.allclose(windows[2], (773.0806313974115, 961.758495318458), atol=1e-9)
@@ -150,9 +147,58 @@ def test_mallala_compound_corner_consolidates_multiple_raw_regions():
             raw_regions.append(fragment)
             lean[fragment[0]:fragment[1] + 1] = 10.0 * signs[corner]
 
-    selected, diagnostics = module._select_mallala_corner_regions(
-        track, {"track_s_m": track_s, "roll_angle_deg": lean}, tuple(raw_regions))
+    selected, review = module._consolidate_mallala_corner_regions(
+        track, _assignment_columns(track_s, lean), tuple(raw_regions))
 
-    t3 = next(item for item in diagnostics if item.get("corner") == 3)
-    assert len(t3["raw_regions"]) == 2
+    t3 = [row for row in review if row.get("nominal_corner") == "T3"]
+    assert len(t3) == 2
+    assert {row["consolidated_start_index"] for row in t3} == {raw_regions[2][0]}
+    assert {row["consolidated_end_index"] for row in t3} == {raw_regions[3][1]}
     assert selected[2] == (raw_regions[2][0], raw_regions[3][1])
+
+
+def _one_raw_region_per_nominal_corner(module, track, track_s):
+    raw_regions = []
+    lean = np.zeros_like(track_s, dtype=float)
+    for sign, (start_m, end_m) in zip(
+            module._mallala_corner_turn_signs(track), module._mallala_corner_windows(track)):
+        region = (int(np.floor(start_m)), int(np.ceil(end_m)))
+        raw_regions.append(region)
+        lean[region[0]:region[1] + 1] = 10.0 * sign
+    return raw_regions, lean
+
+
+def test_mallala_unassigned_raw_region_fails_clearly_and_can_be_reviewed(tmp_path):
+    module = _module()
+    track = Track.from_yaml(TRACK)
+    track_s = np.arange(2558, dtype=float)
+    raw_regions, lean = _one_raw_region_per_nominal_corner(module, track, track_s)
+    setup = (20, 40)
+    raw_regions.append(setup)
+    lean[setup[0]:setup[1] + 1] = -10.0 * module._mallala_corner_turn_signs(track)[0]
+    columns = _assignment_columns(track_s, lean)
+
+    with pytest.raises(ValueError, match="unassigned Mallala raw lean regions: 10"):
+        module._consolidate_mallala_corner_regions(track, columns, tuple(raw_regions))
+
+    regions, review = module._consolidate_mallala_corner_regions(
+        track, columns, tuple(raw_regions), allow_unassigned=True)
+    assert len(regions) == 9
+    rejected = review[-1]
+    assert rejected["raw_region_index"] == 10
+    assert rejected["status"] == "unassigned"
+    assert "turn direction conflicts" in rejected["assignment_rule"]
+
+    output = tmp_path / "corner_review.csv"
+    module._write_corner_review_csv(output, review)
+    header, *rows = output.read_text(encoding="utf-8").splitlines()
+    assert "peak_abs_curvature_1pm" in header
+    assert "consolidated_start_track_s_m" in header
+    assert len(rows) == len(raw_regions)
+
+
+def test_mallala_compound_primitive_groups_remain_t3_t6_t7():
+    module = _module()
+    assert module.MALLALA_CORNER_PRIMITIVE_GROUPS[2] == (5, 6, 7)
+    assert module.MALLALA_CORNER_PRIMITIVE_GROUPS[5] == (13, 14)
+    assert module.MALLALA_CORNER_PRIMITIVE_GROUPS[6] == (16, 17)
