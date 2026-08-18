@@ -13,6 +13,12 @@ from .interface import (
     build_runoff_input_package,
     derive_closed_path_heading_rad,
 )
+from .export import (
+    DEPARTURE_SEED_FIELDS,
+    RUNOFF_BUNDLE_VERSION,
+    serialize_runoff_bundle,
+    write_runoff_bundle,
+)
 
 __all__ = [
     "RUNOFF_INTERFACE_VERSION",
@@ -21,4 +27,8 @@ __all__ = [
     "build_departure_seeds",
     "build_runoff_input_package",
     "derive_closed_path_heading_rad",
+    "DEPARTURE_SEED_FIELDS",
+    "RUNOFF_BUNDLE_VERSION",
+    "serialize_runoff_bundle",
+    "write_runoff_bundle",
 ]

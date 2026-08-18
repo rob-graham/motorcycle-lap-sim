@@ -83,6 +83,7 @@ A known retained-path artefact is that the closed-loop racing line bends toward 
 - `optimisation`: local deterministic racing-line optimisation, direct planar controls, warm starts, and assurance diagnostics.
 - `telemetry`: Mallala data ingestion, quality, registration, map matching, repeatability/peer analysis, and comparison utilities.
 - `coaching`: deterministic extraction of reviewed rider-facing and engineering landmarks from solved trajectory state.
+- `runoff`: versioned in-memory trajectory/departure contract and deterministic portable bundle export; no physical run-off propagation.
 - plotting/scripts: reporting, validation, regression, coaching presentation, and engineering diagnostics kept separate from numerical modules.
 
 ## Validation and claim boundaries
@@ -93,9 +94,9 @@ The measured rider line is validation evidence, not the optimiser objective. The
 
 The Mallala geometry is approximate rather than survey-grade, and the provisional R6 model remains incompletely identified.
 
-## Next active interface - simulator to run-off calculations
+## Active Phase 12B gate - retained-Mallala run-off export
 
-With Phase 12A's numerical and visual review complete, the next active task is to define the versioned simulator-to-run-off calculation interface.
+Phase 12A's numerical and visual review is closed. The Phase 12B `0.1.0` in-memory simulator-to-run-off interface is implemented; the active task integrates it with retained Mallala and provides separately versioned deterministic CSV/JSON serialization.
 
 This interface should be designed around downstream run-off engineering needs and should explicitly define:
 
@@ -108,6 +109,6 @@ This interface should be designed around downstream run-off engineering needs an
 - coordinate-system and version metadata; and
 - the boundary between simulator-derived quantities and assumptions owned by the separate run-off package.
 
-The interface must not silently convert coaching marks or optimiser outputs into safety criteria. Run-off departure seeds and downstream calculations require their own explicit engineering rules and provenance.
+The interface must not silently convert coaching marks or optimiser outputs into safety criteria. Run-off departure seeds and downstream calculations require their own explicit engineering rules and provenance. Phase 12B is not finally closed until the Owner's retained-case target-machine command succeeds; deterministic physical propagation remains a separate downstream package.
 
 Future roadmap work also includes GIS/georeferencing and a reusable 3D `TrackSurface` / `z(s,n)` interface with grade/banking. Those remain future capability unless current repository code and tests explicitly implement them.
