@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -36,6 +37,41 @@ def test_parser_defaults_match_retained_phase11_scenario(tmp_path):
     assert args.spacing_m == 0.125
     assert args.boundary_check_spacing_m == 0.125
     assert args.expected_lap_s == 71.396583646
+
+
+def test_main_writes_trajectory_from_calculated_retained_case(monkeypatch, tmp_path):
+    module = _module()
+    trajectory_export = SimpleNamespace(write_trajectory_csv=lambda path, columns: None)
+    written = []
+    trajectory_export.write_trajectory_csv = lambda path, columns: written.append((path, columns))
+    columns = {"marker": np.asarray([1.0])}
+    retained = {
+        "track": object(),
+        "bike": object(),
+        "controls": np.zeros(51),
+        "evaluation": SimpleNamespace(lap_time_s=71.396583646),
+        "lap_delta_s": 0.0,
+        "columns": columns,
+        "raw_regions": (),
+        "corner_regions": tuple((index, index) for index in range(9)),
+        "corner_review": (),
+        "events": (),
+        "phase9": SimpleNamespace(sha256_file=lambda path: "retained-hash"),
+        "trajectory_export": trajectory_export,
+    }
+    monkeypatch.setattr(module, "calculate_retained_case", lambda args: retained)
+    monkeypatch.setattr(module, "_write_events_csv", lambda *args: None)
+    monkeypatch.setattr(module, "_write_corner_review_csv", lambda *args: None)
+    monkeypatch.setattr(module, "_limit_state_rows", lambda *args: [])
+    monkeypatch.setattr(module, "_write_limit_state_csv", lambda *args: None)
+    monkeypatch.setattr(module, "_write_coaching_overview", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_write_speed_map", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_write_detail", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_write_limit_state_map", lambda *args, **kwargs: None)
+
+    module.main(["representative.csv", str(tmp_path), "--plot-dpi", "1"])
+
+    assert written == [(tmp_path / "phase12a_representative_trajectory.csv", columns)]
 
 
 def test_map_contains_only_rider_facing_event_types():

@@ -19,7 +19,7 @@ from motorcycle_lap_sim.runoff import (
 
 
 REPRESENTATIVE_LABEL = "reduced_reoptimised_51"
-EXPECTED_CONTROLS_SHA256 = "4aa138e5af35e3a9180efc7a79abca7628dac99914ca082019d0140a8dfb02b3"
+EXPECTED_CONTROLS_SHA256 = "7e7916fb998a59b366441f5586134d7c8406d42232243141378cf83b22db1a3d"
 SCENARIO_ID = "mallala_r6_reduced_reoptimised_51_roll_0.8_radps"
 TRACK_ID = "mallala_analytic_reference_track"
 RUNOFF_TRAJECTORY_FIELDS = (
