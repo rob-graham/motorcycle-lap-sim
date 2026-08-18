@@ -46,8 +46,8 @@ EXPECTED_MALLALA_CORNERS = 9
 
 # Groups of analytic reference-track primitives that represent Mallala T1-T9.
 # T3, T6 and T7 are compound same-direction bends in the current approximate
-# reference geometry.  This case-specific mapping is used only to reject
-# straight/setup lean artefacts after the generic lean-hysteresis detector.
+# reference geometry.  This case-specific mapping consolidates raw lean regions without changing
+# the generic lean-hysteresis detector.
 MALLALA_CORNER_PRIMITIVE_GROUPS = (
     (1,),
     (3,),
@@ -264,10 +264,38 @@ def _select_mallala_corner_regions(track, columns, raw_regions):
             "turn_sign": expected_signs[owner],
         })
 
-    if len(selected) != EXPECTED_MALLALA_CORNERS:
-        raise ValueError(
-            f"mapped {len(selected)} Mallala corner regions; expected {EXPECTED_MALLALA_CORNERS}")
-    return tuple(selected), tuple(diagnostics)
+    missing = [f"T{i + 1}" for i, assigned in enumerate(assignments) if not assigned]
+    if missing:
+        raise ValueError(f"nominal Mallala corners have no assigned raw region: {', '.join(missing)}")
+    consolidated = tuple((min(x[0] for x in assigned), max(x[1] for x in assigned))
+                         for assigned in assignments)
+    review = []
+    for raw_index, start, end, sign, corner_index, overlap in raw_details:
+        consolidated_region = consolidated[corner_index] if corner_index is not None else None
+        review.append({
+            "raw_region_index": raw_index,
+            "nominal_corner": "" if corner_index is None else f"T{corner_index + 1}",
+            "raw_start_s_m": float(track_s[start]),
+            "raw_end_s_m": float(track_s[end]),
+            "consolidated_start_s_m": "" if consolidated_region is None else
+                float(track_s[consolidated_region[0]]),
+            "consolidated_end_s_m": "" if consolidated_region is None else
+                float(track_s[consolidated_region[1]]),
+            "turn_sign": sign,
+            "peak_abs_lean_deg": float(np.max(np.abs(lean[start:end + 1]))),
+            "peak_abs_curvature_1pm": float(np.max(np.abs(curvature[start:end + 1]))),
+            "assignment_rule": ("unassigned_direction_or_ownership_mismatch" if corner_index is None
+                                else "maximum_chainage_overlap_with_mid_straight_ownership_and_turn_sign"),
+            "confidence": "review" if corner_index is None else ("high" if overlap > 0.0 else "low"),
+        })
+    return consolidated, tuple(review)
+
+
+def _write_corner_review_csv(path, review_rows):
+    with Path(path).open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=CORNER_REVIEW_FIELDS)
+        writer.writeheader()
+        writer.writerows(review_rows)
 
 
 def _write_events_csv(path, events):
@@ -506,8 +534,8 @@ def main(argv=None):
         track, evaluation.smooth_line, evaluation.speed_profile, bike)
     config = EventDetectionConfig()
     raw_regions = detect_corner_regions(columns, config)
-    corner_regions, corner_mapping = _select_mallala_corner_regions(
-        track, columns, raw_regions)
+    corner_regions, corner_review = _consolidate_mallala_corner_regions(
+        track, columns, raw_regions, allow_unassigned=True)
     events = extract_coaching_events(
         columns, config, corner_regions=corner_regions,
         expected_corner_count=EXPECTED_MALLALA_CORNERS)
