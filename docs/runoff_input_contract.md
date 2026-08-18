@@ -2,6 +2,7 @@
 
 **Status:** Phase 12B internal prototype  
 **Interface version:** `0.1.0`
+**Bundle version:** `1.0.0`
 
 ## Purpose
 
@@ -34,6 +35,10 @@ The initial hand-off requires sample index, both chainages, racing-line x/y, phy
 Gear, RPM and selected model-limit flags may be included when present. Their presence is diagnostic and does not make them run-off criteria.
 
 Required arrays are equal-length defensive copies. Chainages start at zero and increase strictly, sample indices are contiguous integer values from zero, and numeric/string array storage is backed by immutable bytes so NumPy writes cannot simply be re-enabled by the consumer.
+
+## Portable directory bundle
+
+Bundle version `1.0.0` serializes the in-memory interface without changing its `0.1.0` semantics. It contains deterministic `manifest.json`, `trajectory.csv`, and `departure_seeds.csv` files. The manifest records field order, counts, interface and bundle versions, coordinate/chainage/sampling conventions, scenario metadata, warnings, and SHA-256 hashes of both CSV files. CSV uses a fixed column order, UTF-8, LF line endings and round-trip-safe floating-point text. It contains no timestamp or other runtime-varying field.
 
 The interface performs structural consistency checks. It does **not** claim to re-prove complete track geometry correctness (for example, swapped boundaries or survey-grade spatial consistency); those matters remain tied to upstream geometry provenance and retained-case integration checks.
 
@@ -82,7 +87,7 @@ Residual-speed-at-barrier criteria, including any future 24 km/h case, must ther
 
 ## Next increments
 
-After review of this contract, the next step is a bounded retained-Mallala Phase 12A integration export using the retained trajectory and generated event set. That runtime/integration check should verify total-length and wrap semantics, event-set provenance, candidate counts/types and representative fields before the interface is treated as frozen.
+The active gate is the bounded retained-Mallala integration export using the retained trajectory and generated Phase 12A event set. The retained acceptance identity is fail-closed: its fixed controls SHA-256 and canonical deleted-control index, margin, roll-rate scenario, sampling settings, expected lap and reproduction tolerance cannot be overridden by a caller. It verifies total-length and wrap semantics, content-derived event-set provenance, candidate counts/types and representative fields. Phase 12B must not be treated as finally closed until the Owner successfully executes that command on the target machine.
 
 After that, begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. The first physical calculations will use a final speed of zero. Surface/terrain propagation, protection-geometry intersection and any non-zero barrier residual-speed criteria will then be added as separately reviewable increments, followed by standards comparison, georeferencing and 3D terrain fields.
 

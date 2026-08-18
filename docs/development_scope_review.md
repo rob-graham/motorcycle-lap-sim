@@ -2,7 +2,7 @@
 
 **Review date:** 2026-08-18
 
-This review records the bounded development sequence through Phase 12A and identifies the next active engineering task.
+This review records the bounded development sequence through Phase 12A and the active Phase 12B retained-Mallala export gate.
 
 ## Closed decisions retained
 
@@ -48,11 +48,11 @@ Further optimisation work requires a downstream finding that the retained repres
 
 Further coaching/rider-facing refinement requires a separate purpose, such as multi-rider review, improved rider/control modelling, or a need to publish validated rider guidance. It is not required merely to continue the engineering run-off workflow.
 
-## Next bounded task: simulator-to-run-off calculation interface
+## Active bounded task: retained-Mallala integration and serialization
 
-The Phase 12A visual gate has now been passed. The next active task is therefore to define and test the versioned simulator-to-run-off contract and the candidate departure-condition workflow.
+The Phase 12A visual gate has passed, and the Phase 12B `0.1.0` in-memory simulator-to-run-off contract and candidate departure workflow already exist. The active increment integrates the retained Mallala trajectory and reviewed event set and adds a separately versioned deterministic directory bundle.
 
-The next stage should decide which solved trajectory fields and reviewed events are transferred downstream, while keeping run-off assumptions separate from coaching and optimiser semantics.
+This integration must validate the retained lap, total-length/wrap semantics, event/trajectory correspondence, provenance, candidate counts and serialization on the Owner's target machine. Phase 12B remains open until that command succeeds.
 
 At minimum, the interface work should define:
 
@@ -66,3 +66,5 @@ At minimum, the interface work should define:
 - the ownership boundary between simulator output and the separate run-off package.
 
 The downstream interface must not treat coaching marks, optimiser controls, optimiser spread, or capability-limit classifications as safety criteria by default. Each run-off input must have an explicit engineering reason, definition, units, and provenance.
+
+After target-machine acceptance, the next bounded work is a separate deterministic physical run-off package. Off-track propagation, mapping/georeferencing and 3D terrain are not part of this simulator export increment.
