@@ -628,11 +628,8 @@ def _write_corner_review_csv(path, review_rows):
             writer.writerow({field: row.get(field, "") for field in fields})
 
 
-def main(argv=None):
-    args = build_parser().parse_args(argv)
-    if args.plot_dpi <= 0:
-        raise ValueError("plot DPI must be positive")
-
+def calculate_retained_case(args):
+    """Re-evaluate the retained line and extract reviewed events without plotting."""
     phase8 = _load_sibling("r6_phase8_planar_optimisation_check.py", "phase8_phase12a")
     phase9 = _load_sibling("r6_phase9_baseline_check.py", "phase9_phase12a")
     phase9f = _load_sibling("r6_phase9f_roll_aware_optimisation.py", "phase9f_phase12a")
@@ -682,6 +679,37 @@ def main(argv=None):
     events = extract_coaching_events(
         columns, config, corner_regions=corner_regions,
         expected_corner_count=EXPECTED_MALLALA_CORNERS)
+    return {
+        "track": track,
+        "bike": bike,
+        "controls": controls,
+        "evaluation": evaluation,
+        "lap_delta_s": lap_delta,
+        "columns": columns,
+        "raw_regions": raw_regions,
+        "corner_regions": corner_regions,
+        "corner_review": corner_review,
+        "events": events,
+        "phase9": phase9,
+    }
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.plot_dpi <= 0:
+        raise ValueError("plot DPI must be positive")
+    retained = calculate_retained_case(args)
+    track = retained["track"]
+    bike = retained["bike"]
+    controls = retained["controls"]
+    evaluation = retained["evaluation"]
+    lap_delta = retained["lap_delta_s"]
+    columns = retained["columns"]
+    raw_regions = retained["raw_regions"]
+    corner_regions = retained["corner_regions"]
+    corner_review = retained["corner_review"]
+    events = retained["events"]
+    phase9 = retained["phase9"]
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trajectory_csv = args.output_dir / "phase12a_representative_trajectory.csv"

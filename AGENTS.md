@@ -24,8 +24,8 @@
 - Do not infer roadmap phase status from historical script names alone. Some repository `phase10` scripts implement work now grouped under project Phase 9.
 - The Phase 9/10 Mallala validation/runtime workflow is reproducible and Phase 10 is closed for the present sequence with substantial calibration explicitly deferred for identifiability reasons; see `docs/phase10_mallala_closure.md`.
 - Phase 11 optimisation assurance is closed for the present Mallala sequence. The retained representative is `reduced_reoptimised_51` at 71.396583646 s on the 0.125 m authoritative Python common grid; see `docs/phase11_optimisation_assurance_closure.md`.
-- Current development priority is Phase 12A coaching-event extraction and visual review on that retained representative line; see `docs/coaching_event_definitions.md`.
-- Do not define or freeze the simulator-to-run-off export contract until the Phase 12A Mallala event locations have been numerically and visually reviewed. Do not revive superseded Phase 11C/11D experiments without a new explicit engineering justification and bounded benchmark plan.
+- Phase 12A coaching-event extraction and visual review are closed; see `docs/phase12a_coaching_event_closure.md`. The Phase 12B `0.1.0` in-memory run-off interface is implemented.
+- Current development priority is the Phase 12B retained-Mallala integration and deterministic serialization acceptance gate. Phase 12B must not be called closed until the Owner successfully runs the retained-case command on the target machine. Physical run-off propagation remains a separate downstream package. Do not revive superseded Phase 11C/11D experiments without a new explicit engineering justification and bounded benchmark plan.
 
 ## Branch and agent workflow
 

@@ -41,7 +41,7 @@ Preserve the modular separation of track geometry and boundaries, racing-line/pa
 
 Measured data must not become a hidden dependency of the physics solver. Coaching/event extraction consumes solved state and does not alter physics or optimisation.
 
-The wider project also contains future workstreams for three-dimensional track-surface/LiDAR processing, GIS export, and run-off calculations. The run-off calculation remains a separate package. With Phase 12A now reviewed and closed, the simulator-to-run-off contract is the next active interface-development task.
+The wider project also contains future workstreams for three-dimensional track-surface/LiDAR processing, GIS export, and run-off calculations. The physical run-off calculation remains a separate package. Phase 12A is closed and the Phase 12B `0.1.0` in-memory interface exists; the active gate is retained-Mallala integration and deterministic file serialization.
 
 ## 4. Closed simulator phases
 
@@ -84,11 +84,11 @@ Important closure caveats are:
 
 In particular, the retained closed-loop line bends toward the centre of the start/finish straight. That is a known modelling/optimisation artefact and must not be presented to riders as the recommended line. It does not block the run-off calculation work.
 
-## 5. Current active task - simulator-to-run-off interface and departure conditions
+## 5. Current active task - retained-Mallala run-off export acceptance
 
-Phase 12A's visual gate has been passed, so the next bounded task is to define and test the versioned simulator-to-run-off calculation contract.
+Phase 12A's visual gate has been passed and the versioned `0.1.0` in-memory contract has been implemented. The bounded Phase 12B task now integrates that contract with the retained trajectory and reviewed event set and serializes a deterministic, portable bundle.
 
-The interface should be driven by the separate run-off package's engineering needs rather than by rider-facing presentation. It should decide which solved trajectory fields, reviewed events, provenance/confidence values, coordinate conventions, scenario metadata, and candidate departure-point / departure-condition seeds are transferred downstream.
+The interface is driven by the separate run-off package's engineering needs rather than by rider-facing presentation. Target-machine acceptance must reproduce the retained lap, validate wrap/length and event correspondence, and record exact provenance before this integration/export gate or Phase 12B is called closed.
 
 At minimum, the work should consider:
 
@@ -103,6 +103,8 @@ At minimum, the work should consider:
 - explicit separation between simulator results and run-off calculation assumptions.
 
 The run-off contract must not silently convert coaching marks into safety criteria. Departure seeds should be derived and justified for run-off analysis, with coaching events used only where they provide a useful, traceable starting point.
+
+After successful Owner acceptance, the next task is the separate deterministic physical run-off package. Mapping/georeferencing and 3D terrain remain later work.
 
 ## 6. Current repository status relevant to review
 
