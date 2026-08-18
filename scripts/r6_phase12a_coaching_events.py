@@ -25,6 +25,10 @@ from motorcycle_lap_sim.coaching import (
     extract_coaching_events,
 )
 from motorcycle_lap_sim.motorcycle.config import HandlingConfig, load_motorcycle_config
+from motorcycle_lap_sim.speed_solver import (
+    braking_capability,
+    forward_acceleration_capability,
+)
 from motorcycle_lap_sim.optimisation import (
     REFERENCE_PLANAR_CONTROL_POLICY,
     evaluate_planar_racing_line,
@@ -77,7 +81,7 @@ OVERVIEW_EVENT_TYPES = (
 MAP_EVENT_TYPES = OVERVIEW_EVENT_TYPES
 
 DETAIL_EVENT_TYPES = (
-    "braking_onset", "brake_release", "turn_in", "geometric_apex",
+    "braking_onset", "maximum_braking", "brake_release", "turn_in", "geometric_apex",
     "positive_drive_pickup", "corner_exit", "speed_apex", "maximum_curvature",
 )
 
@@ -86,15 +90,17 @@ EVENT_ABBREVIATIONS = {
     "brake_release": "REL",
     "turn_in": "TURN",
     "geometric_apex": "APEX",
-    "positive_drive_pickup": "GAS",
+    "maximum_braking": "MAX-BRK",
+    "positive_drive_pickup": "DRIVE",
     "corner_exit": "EXIT",
-    "speed_apex": "V-APEX",
+    "speed_apex": "VMIN",
     "maximum_curvature": "K-MAX",
 }
 
 EVENT_MARKERS = {
     "braking_onset": "v",
     "brake_release": "s",
+    "maximum_braking": "*",
     "turn_in": ">",
     "geometric_apex": "o",
     "positive_drive_pickup": "^",
@@ -109,7 +115,87 @@ VISUAL_OUTPUT_FILENAMES = {
     "detail_T1_T3": "phase12a_T1_T3_detail.png",
     "detail_T4_T6": "phase12a_T4_T6_detail.png",
     "detail_T7_T9": "phase12a_T7_T9_detail.png",
+    "limit_state_map": "phase12a_limit_state_map.png",
 }
+
+LIMIT_STATE_FIELDS = (
+    "track_s_m", "speed_mps", "longitudinal_acceleration_mps2", "lean_angle_deg",
+    "available_forward_acceleration_mps2", "available_braking_deceleration_mps2",
+    "drive_utilisation", "brake_utilisation", "active_limiting_reason",
+    "classified_state", "trail_braking_proxy",
+)
+
+
+def _classify_limit_state(acceleration, forward_available, brake_available,
+                          forward_reason, brake_reason, passive_acceleration,
+                          *, active_fraction=0.98, acceleration_tolerance=0.05):
+    """Classify solved operation without mistaking capability for utilisation."""
+    drive_utilisation = (acceleration / forward_available
+                         if forward_available > acceleration_tolerance else 0.0)
+    brake_utilisation = (-acceleration / brake_available
+                         if brake_available > acceleration_tolerance else 0.0)
+    if acceleration > acceleration_tolerance:
+        if drive_utilisation >= active_fraction:
+            names = {"wheelie": "wheelie-limited drive",
+                     "tyre traction": "traction-limited drive",
+                     "engine/power": "engine/power-limited drive"}
+            state = names.get(forward_reason, "sub-max drive")
+            reason = forward_reason
+        else:
+            state, reason = "sub-max drive", "none (below forward capability)"
+    elif acceleration < -acceleration_tolerance:
+        if abs(acceleration - passive_acceleration) <= acceleration_tolerance:
+            state, reason = "coast/passive resistance", "coasting/resistance"
+        elif brake_utilisation >= active_fraction:
+            state = ("stoppie-limited braking" if brake_reason == "stoppie"
+                     else "tyre-limited braking")
+            reason = brake_reason
+        else:
+            state, reason = "sub-max deceleration", "none (below braking capability)"
+    else:
+        state, reason = "coast/passive resistance", "coasting/resistance"
+    return state, reason, drive_utilisation, brake_utilisation
+
+
+def _limit_state_rows(columns, bike, *, active_fraction=0.98,
+                      trail_lean_deg=4.0, force_tolerance_n=1.0):
+    rows = []
+    mass = bike.motorcycle.mass_kg
+    for index, (speed, curvature, acceleration, lean) in enumerate(zip(
+            columns["speed_mps"], columns["path_curvature_1pm"],
+            columns["longitudinal_acceleration_mps2"], columns["roll_angle_deg"])):
+        forward = forward_acceleration_capability(float(speed), float(curvature), bike)
+        braking = braking_capability(float(speed), float(curvature), bike)
+        passive = -(forward.drag_n + forward.rolling_resistance_n) / mass
+        state, reason, drive_use, brake_use = _classify_limit_state(
+            float(acceleration), forward.acceleration_mps2, braking.deceleration_mps2,
+            forward.limiting_reason, braking.limiting_reason, passive,
+            active_fraction=active_fraction)
+        required_braking_force = max(
+            0.0, mass * (-float(acceleration)) - forward.drag_n - forward.rolling_resistance_n)
+        trail = _is_trail_braking_proxy(
+            float(lean), required_braking_force, lean_threshold_deg=trail_lean_deg,
+            force_tolerance_n=force_tolerance_n)
+        rows.append({
+            "track_s_m": float(columns["track_s_m"][index]),
+            "speed_mps": float(speed),
+            "longitudinal_acceleration_mps2": float(acceleration),
+            "lean_angle_deg": float(lean),
+            "available_forward_acceleration_mps2": forward.acceleration_mps2,
+            "available_braking_deceleration_mps2": braking.deceleration_mps2,
+            "drive_utilisation": drive_use,
+            "brake_utilisation": brake_use,
+            "active_limiting_reason": reason,
+            "classified_state": state,
+            "trail_braking_proxy": trail,
+        })
+    return rows
+
+
+def _is_trail_braking_proxy(lean_deg, required_braking_force_n, *,
+                             lean_threshold_deg=4.0, force_tolerance_n=1.0):
+    return (abs(lean_deg) >= lean_threshold_deg and
+            required_braking_force_n > force_tolerance_n)
 
 
 def _load_sibling(filename, module_name):
@@ -452,15 +538,77 @@ def _write_detail(path, columns, events, first, last, *, dpi):
     axis.plot(right_x[sl], right_y[sl], color="0.45", linewidth=0.7)
     axis.plot(bike_x[sl], bike_y[sl], color="C0", linewidth=1.3,
               label="Representative racing line")
-    _scatter_events(axis, selected, DETAIL_EVENT_TYPES, annotate=True)
+    _scatter_events(axis, selected, DETAIL_EVENT_TYPES, annotate=False)
     _draw_corner_labels(axis, events, first, last)
+    callouts = _detail_callout_rows(selected)
+    axis.text(1.01, 0.98, "\n".join(callouts), transform=axis.transAxes,
+              va="top", ha="left", fontsize=7, family="monospace",
+              bbox={"boxstyle": "round,pad=0.3", "fc": "white", "alpha": 0.9,
+                    "linewidth": 0.4})
     margin = 25.0
     axis.set_xlim(min(left_x[sl].min(), right_x[sl].min()) - margin,
                   max(left_x[sl].max(), right_x[sl].max()) + margin)
     axis.set_ylim(min(left_y[sl].min(), right_y[sl].min()) - margin,
                   max(left_y[sl].max(), right_y[sl].max()) + margin)
+    figure.subplots_adjust(right=0.76)
     _finish_plot(figure, axis, path,
                  f"Mallala Phase 12A event detail — T{first} to T{last}", dpi)
+
+
+def _detail_callout_rows(events, group_distance_m=5.0):
+    """Return deterministic, chainage-ordered grouped engineering callouts."""
+    rows = []
+    for corner in sorted({event.corner for event in events if event.corner.startswith("T")},
+                         key=lambda value: int(value[1:]) if value[1:].isdigit() else 999):
+        selected = sorted((event for event in events if event.corner == corner and
+                           event.event_type in DETAIL_EVENT_TYPES),
+                          key=lambda event: (event.track_s_m, event.event_type))
+        groups = []
+        for event in selected:
+            if groups and event.track_s_m - groups[-1][-1].track_s_m <= group_distance_m:
+                groups[-1].append(event)
+            else:
+                groups.append([event])
+        for group in groups:
+            labels = "/".join(EVENT_ABBREVIATIONS[event.event_type] for event in group)
+            chainage = sum(event.track_s_m for event in group) / len(group)
+            rows.append(f"{corner} {labels:<24} {chainage:7.1f} m")
+    return rows
+
+
+def _write_limit_state_csv(path, rows):
+    with Path(path).open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=LIMIT_STATE_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_limit_state_map(path, columns, rows, *, dpi):
+    import matplotlib.pyplot as plt
+    bike_x = np.asarray(columns["bike_x_m"], dtype=float)
+    bike_y = np.asarray(columns["bike_y_m"], dtype=float)
+    states = [row["classified_state"] for row in rows]
+    palette = {
+        "wheelie-limited drive": "C1", "traction-limited drive": "C3",
+        "engine/power-limited drive": "C2", "sub-max drive": "C0",
+        "coast/passive resistance": "0.65", "sub-max deceleration": "C4",
+        "tyre-limited braking": "C5", "stoppie-limited braking": "C6",
+    }
+    figure, axis = plt.subplots(figsize=(13, 10))
+    left_x, left_y, right_x, right_y, _, _ = _track_plot_data(columns)
+    axis.plot(left_x, left_y, color="0.8", linewidth=0.5)
+    axis.plot(right_x, right_y, color="0.8", linewidth=0.5)
+    for state in palette:
+        mask = np.asarray([value == state for value in states])
+        if np.any(mask):
+            axis.scatter(bike_x[mask], bike_y[mask], s=2.5, color=palette[state],
+                         label=state, zorder=3)
+    trail = np.asarray([row["trail_braking_proxy"] for row in rows], dtype=bool)
+    if np.any(trail):
+        axis.scatter(bike_x[trail], bike_y[trail], s=12, facecolors="none",
+                     edgecolors="black", linewidths=0.5, label="trail-braking proxy", zorder=4)
+    _finish_plot(figure, axis, path,
+                 "Mallala Phase 12A engineering longitudinal limit-state diagnostic", dpi)
 
 
 def _write_corner_review_csv(path, review_rows):
@@ -539,18 +687,23 @@ def main(argv=None):
     trajectory_csv = args.output_dir / "phase12a_representative_trajectory.csv"
     events_csv = args.output_dir / "phase12a_coaching_events.csv"
     corner_review_csv = args.output_dir / "phase12a_corner_regions_review.csv"
+    limit_state_csv = args.output_dir / "phase12a_limit_state.csv"
     visual_paths = {
         name: args.output_dir / filename for name, filename in VISUAL_OUTPUT_FILENAMES.items()
     }
     trajectory.write_trajectory_csv(trajectory_csv, columns)
     _write_events_csv(events_csv, events)
     _write_corner_review_csv(corner_review_csv, corner_review)
+    limit_state_rows = _limit_state_rows(columns, bike)
+    _write_limit_state_csv(limit_state_csv, limit_state_rows)
     _write_coaching_overview(
         visual_paths["coaching_overview"], track, columns, events, dpi=args.plot_dpi)
     _write_speed_map(visual_paths["speed_map"], track, columns, events, dpi=args.plot_dpi)
     for name, first, last in (("detail_T1_T3", 1, 3), ("detail_T4_T6", 4, 6),
                               ("detail_T7_T9", 7, 9)):
         _write_detail(visual_paths[name], columns, events, first, last, dpi=args.plot_dpi)
+    _write_limit_state_map(
+        visual_paths["limit_state_map"], columns, limit_state_rows, dpi=args.plot_dpi)
 
     counts = {event_type: 0 for event_type in (
         "local_max_speed", "braking_onset", "maximum_braking", "brake_release",
@@ -592,11 +745,13 @@ def main(argv=None):
     print(f"trajectory_csv={trajectory_csv}")
     print(f"coaching_events_csv={events_csv}")
     print(f"corner_regions_review_csv={corner_review_csv}")
+    print(f"limit_state_csv={limit_state_csv}")
     print(f"coaching_overview_png={visual_paths['coaching_overview']}")
     print(f"speed_map_png={visual_paths['speed_map']}")
     print(f"detail_T1_T3_png={visual_paths['detail_T1_T3']}")
     print(f"detail_T4_T6_png={visual_paths['detail_T4_T6']}")
     print(f"detail_T7_T9_png={visual_paths['detail_T7_T9']}")
+    print(f"limit_state_map_png={visual_paths['limit_state_map']}")
     print("visual_review_required=true")
     print("runoff_export_contract_status=deferred_until_after_visual_event_review")
     return {
@@ -605,6 +760,7 @@ def main(argv=None):
         "raw_regions": raw_regions,
         "corner_regions": corner_regions,
         "events": events,
+        "limit_state_rows": limit_state_rows,
     }
 
 
