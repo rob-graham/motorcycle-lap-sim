@@ -8,6 +8,8 @@
 
 This contract defines the simulator-side hand-off to a separate run-off calculation package. It transfers solved trajectory state and traceable candidate departure states. Run-off calculation assumptions remain downstream and are not embedded in the lap simulator.
 
+The canonical machine-readable cross-repository contract snapshot is [`contracts/runoff_interface_0.1.0.json`](../contracts/runoff_interface_0.1.0.json).
+
 The current ownership boundary is:
 
 - `motorcycle-lap-sim` owns solved trajectory state, simulator track-edge geometry, event provenance, and candidate departure-state extraction;

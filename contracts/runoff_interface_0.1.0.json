@@ -1,0 +1,81 @@
+{
+  "bundle": {
+    "artifacts": [
+      "manifest.json",
+      "trajectory.csv",
+      "departure_seeds.csv"
+    ],
+    "bundle_version": "1.0.0",
+    "closed_loop_convention": "duplicated endpoint omitted",
+    "runoff_interface_version": "0.1.0",
+    "wrap_handling": "path_length_m and track_length_m are supplied separately"
+  },
+  "contract_id": "motorcycle-lap-sim/runoff-interface/0.1.0",
+  "departure_seeds": {
+    "candidate_semantics": "analysis inputs, not occurrence probabilities or safety acceptance criteria",
+    "fields": [
+      {"serialized_name": "seed_id", "meaning": "deterministic seed identifier", "unit": "none", "type": "string"},
+      {"serialized_name": "corner", "meaning": "source analysis corner label", "unit": "none", "type": "string"},
+      {"serialized_name": "seed_type", "meaning": "candidate departure interpretation", "unit": "none", "type": "string"},
+      {"serialized_name": "sample_index", "meaning": "zero-based trajectory row index", "unit": "none", "type": "integer"},
+      {"serialized_name": "track_s_m", "meaning": "reference-track chainage at the seed", "unit": "m", "type": "number"},
+      {"serialized_name": "path_q_m", "meaning": "solved-path chainage at the seed", "unit": "m", "type": "number"},
+      {"serialized_name": "x_m", "meaning": "local Cartesian motorcycle x coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "y_m", "meaning": "local Cartesian motorcycle y coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "heading_rad", "meaning": "solved-path heading", "unit": "rad", "type": "number"},
+      {"serialized_name": "speed_mps", "meaning": "motorcycle speed", "unit": "m/s", "type": "number"},
+      {"serialized_name": "longitudinal_acceleration_mps2", "meaning": "signed longitudinal acceleration", "unit": "m/s^2", "type": "number"},
+      {"serialized_name": "lateral_acceleration_mps2", "meaning": "signed lateral acceleration", "unit": "m/s^2", "type": "number"},
+      {"serialized_name": "curvature_1pm", "meaning": "signed solved-path curvature", "unit": "1/m", "type": "number"},
+      {"serialized_name": "lean_angle_rad", "meaning": "demanded motorcycle lean angle", "unit": "rad", "type": "number"},
+      {"serialized_name": "roll_rate_radps", "meaning": "Level-1 model roll-rate term", "unit": "rad/s", "type": "number"},
+      {"serialized_name": "source_event_type", "meaning": "analysis event type that produced the candidate", "unit": "none", "type": "string"},
+      {"serialized_name": "source_rule", "meaning": "rule used to derive the source analysis event", "unit": "none", "type": "string"},
+      {"serialized_name": "confidence", "meaning": "source analysis event confidence", "unit": "none", "type": "string"},
+      {"serialized_name": "interpretation", "meaning": "human-readable candidate interpretation", "unit": "none", "type": "string"}
+    ],
+    "landmark_semantics": "turn-in, apex, and corner-exit are analysis landmarks",
+    "physical_state_source": "trajectory row at sample_index",
+    "supported_seed_types": [
+      "missed_braking_candidate",
+      "upright_overrun_candidate",
+      "entry_lowside_turn_in_candidate",
+      "entry_lowside_apex_candidate",
+      "entry_lowside_corner_exit_candidate",
+      "exit_highside_candidate"
+    ]
+  },
+  "producer_repo": "rob-graham/motorcycle-lap-sim",
+  "runoff_bundle_version": "1.0.0",
+  "runoff_interface_version": "0.1.0",
+  "trajectory": {
+    "fields": [
+      {"serialized_name": "sample_index", "meaning": "zero-based trajectory row index", "unit": "none", "type": "integer"},
+      {"serialized_name": "track_s_m", "meaning": "reference-track chainage", "unit": "m", "type": "number"},
+      {"serialized_name": "path_q_m", "meaning": "arc length along the solved racing line", "unit": "m", "type": "number"},
+      {"serialized_name": "bike_x_m", "downstream_name": "x_m", "meaning": "local Cartesian motorcycle x coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "bike_y_m", "downstream_name": "y_m", "meaning": "local Cartesian motorcycle y coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "left_boundary_x_m", "meaning": "local Cartesian left track-boundary x coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "left_boundary_y_m", "meaning": "local Cartesian left track-boundary y coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "right_boundary_x_m", "meaning": "local Cartesian right track-boundary x coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "right_boundary_y_m", "meaning": "local Cartesian right track-boundary y coordinate", "unit": "m", "type": "number"},
+      {"serialized_name": "speed_mps", "meaning": "motorcycle speed", "unit": "m/s", "type": "number"},
+      {"serialized_name": "longitudinal_acceleration_mps2", "meaning": "signed longitudinal acceleration", "unit": "m/s^2", "type": "number"},
+      {"serialized_name": "lateral_acceleration_signed_mps2", "downstream_name": "lateral_acceleration_mps2", "meaning": "signed lateral acceleration", "unit": "m/s^2", "type": "number"},
+      {"serialized_name": "path_curvature_1pm", "downstream_name": "curvature_1pm", "meaning": "signed solved-path curvature", "unit": "1/m", "type": "number"},
+      {"serialized_name": "roll_angle_rad", "downstream_name": "lean_angle_rad", "meaning": "demanded motorcycle lean angle", "unit": "rad", "type": "number"},
+      {"serialized_name": "roll_rate_model_radps", "downstream_name": "roll_rate_radps", "meaning": "Level-1 model roll-rate term", "unit": "rad/s", "type": "number"},
+      {"serialized_name": "gear", "meaning": "selected transmission gear", "unit": "none", "type": "integer"},
+      {"serialized_name": "rpm", "meaning": "engine rotational speed", "unit": "rpm", "type": "number"},
+      {"serialized_name": "roll_rate_limited", "meaning": "roll-rate constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "lateral_grip_limited", "meaning": "lateral-grip constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "powertrain_speed_limited", "meaning": "powertrain speed constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "wheelie_limited", "meaning": "wheelie constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "stoppie_limited", "meaning": "stoppie constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "traction_limited", "meaning": "traction constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "engine_power_limited", "meaning": "engine-power constraint active flag", "unit": "none", "type": "boolean"},
+      {"serialized_name": "longitudinal_limit_reason", "meaning": "diagnostic longitudinal capability-limit classification", "unit": "none", "type": "string"},
+      {"serialized_name": "heading_rad", "downstream_name": "heading_rad", "meaning": "periodic unequal-spacing solved-path heading", "unit": "rad", "type": "number"}
+    ]
+  }
+}
