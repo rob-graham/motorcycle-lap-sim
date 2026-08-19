@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,7 @@ def test_parser_retains_authoritative_mallala_defaults():
     assert args.boundary_check_spacing_m == pytest.approx(0.125)
     assert args.expected_lap_s == pytest.approx(71.396583646)
     assert args.lap_tolerance_s == pytest.approx(2e-6)
+    assert "heading_rad" in module.RUNOFF_TRAJECTORY_FIELDS
 
 
 @pytest.mark.parametrize("option,value", [
@@ -52,6 +54,16 @@ def test_retained_acceptance_controls_hash_is_fixed_not_caller_overridable():
         module._require_retained_acceptance_provenance(args, "0" * 64)
     module._require_retained_acceptance_provenance(
         args, module.EXPECTED_CONTROLS_SHA256)
+
+
+def test_retained_acceptance_pins_added_corner_exit_and_full_seed_counts():
+    module = _load_script()
+    seeds = [SimpleNamespace(seed_type="existing_candidate") for _ in range(43)]
+    seeds += [SimpleNamespace(
+        seed_type="entry_lowside_corner_exit_candidate") for _ in range(9)]
+    module._require_retained_seed_counts(seeds)
+    with pytest.raises(RuntimeError, match="departure seed count mismatch"):
+        module._require_retained_seed_counts(seeds[:-1])
 
 
 def test_event_set_id_is_content_tied_and_deterministic():

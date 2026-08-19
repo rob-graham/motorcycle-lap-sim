@@ -26,7 +26,7 @@ Two distance coordinates are retained:
 
 The package also requires explicit `track_length_m` and `path_length_m`. Samples follow the closed-loop convention **duplicated endpoint omitted**, so the final stored chainage is less than the corresponding total length and the total length supplies the wrap segment across start/finish.
 
-`path_heading_rad` is derived from the solved closed racing-line coordinates using a periodic three-point derivative with respect to `path_q_m`. The unequal-spacing derivative uses the wrapped path length at start/finish; it therefore does not rely on uniform trajectory sampling.
+`heading_rad` is derived from the solved closed racing-line coordinates using a periodic three-point derivative with respect to `path_q_m`. The unequal-spacing derivative uses the wrapped path length at start/finish; it therefore does not rely on uniform trajectory sampling. It is exported at every trajectory sample so downstream analysis can select arbitrary physical states without duplicating heading calculations. The earlier `path_heading_rad` name remains as a compatibility alias.
 
 ## Required trajectory state
 
@@ -65,6 +65,7 @@ Version `0.1.0` maps only supported event semantics with a direct downstream eng
 | `braking_onset` | `upright_overrun_candidate` |
 | `turn_in` | `entry_lowside_turn_in_candidate` |
 | `geometric_apex` | `entry_lowside_apex_candidate` |
+| `corner_exit` | `entry_lowside_corner_exit_candidate` |
 | `positive_drive_pickup` | `exit_highside_candidate` |
 
 Each seed records the source event type, source rule, confidence and exact trajectory sample state. The event sample index must be a finite integer-valued scalar; fractional, boolean, string, non-finite and array-like indices fail closed.
@@ -72,6 +73,8 @@ Each seed records the source event type, source rule, confidence and exact traje
 Event copies of chainage, position, speed, longitudinal acceleration, curvature and lean are checked against the supplied trajectory. A finite event roll-rate copy is also checked against the trajectory roll-rate field. `NaN` roll rate is the one explicit missing-value convention: it means the event did not retain a roll-rate value, so the trajectory field remains authoritative. Physical seed values are always taken from the validated trajectory, not copied from the event object.
 
 The mapping deliberately excludes optimiser spread, optimiser control points and capability-limit classifications as automatic departure criteria.
+
+The corner-exit LOWSIDE candidate supplies the model-derived downstream endpoint that can be paired with the turn-in candidate for dense corner sampling. The simulator does not choose intermediate sampling spacing, generate dense candidates, or calculate run-off requirements. All departure candidates remain analysis inputs, not occurrence probabilities or safety criteria.
 
 ## Explicit non-goals of version 0.1.0
 

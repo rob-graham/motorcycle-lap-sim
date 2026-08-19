@@ -22,6 +22,8 @@ REPRESENTATIVE_LABEL = "reduced_reoptimised_51"
 EXPECTED_CONTROLS_SHA256 = "7e7916fb998a59b366441f5586134d7c8406d42232243141378cf83b22db1a3d"
 SCENARIO_ID = "mallala_r6_reduced_reoptimised_51_roll_0.8_radps"
 TRACK_ID = "mallala_analytic_reference_track"
+EXPECTED_DEPARTURE_SEED_COUNT = 52
+EXPECTED_CORNER_EXIT_SEED_COUNT = 9
 RUNOFF_TRAJECTORY_FIELDS = (
     "sample_index", "track_s_m", "path_q_m", "bike_x_m", "bike_y_m",
     "left_boundary_x_m", "left_boundary_y_m", "right_boundary_x_m",
@@ -31,6 +33,7 @@ RUNOFF_TRAJECTORY_FIELDS = (
     "lateral_grip_limited", "powertrain_speed_limited", "wheelie_limited",
     "stoppie_limited", "traction_limited", "engine_power_limited",
     "longitudinal_limit_reason",
+    "heading_rad",
 )
 
 
@@ -114,14 +117,28 @@ def _require_retained_acceptance_provenance(args, controls_sha256):
             f"actual={controls_sha256} expected={EXPECTED_CONTROLS_SHA256}")
 
 
+def _require_retained_seed_counts(departure_seeds):
+    seed_counts = Counter(seed.seed_type for seed in departure_seeds)
+    actual_total = len(departure_seeds)
+    actual_exits = seed_counts["entry_lowside_corner_exit_candidate"]
+    if (actual_total != EXPECTED_DEPARTURE_SEED_COUNT
+            or actual_exits != EXPECTED_CORNER_EXIT_SEED_COUNT):
+        raise RuntimeError(
+            "retained departure seed count mismatch: "
+            f"total={actual_total} expected={EXPECTED_DEPARTURE_SEED_COUNT}; "
+            f"corner_exit={actual_exits} expected={EXPECTED_CORNER_EXIT_SEED_COUNT}")
+
+
 def assemble_runoff_package(retained, *, controls_sha256, simulator_commit, args):
     """Assemble the real retained-case interface package from Phase 12A output."""
     _require_retained_acceptance_provenance(args, controls_sha256)
     columns = retained["columns"]
-    missing = [field for field in RUNOFF_TRAJECTORY_FIELDS if field not in columns]
+    source_fields = tuple(
+        field for field in RUNOFF_TRAJECTORY_FIELDS if field != "heading_rad")
+    missing = [field for field in source_fields if field not in columns]
     if missing:
         raise RuntimeError(f"retained trajectory lacks run-off fields: {missing}")
-    runoff_columns = {field: columns[field] for field in RUNOFF_TRAJECTORY_FIELDS}
+    runoff_columns = {field: columns[field] for field in source_fields}
     path = retained["evaluation"].smooth_line.sampled_path
     path_length_m = float(path.segment_lengths_m.sum())
     track = retained["track"]
@@ -147,9 +164,11 @@ def assemble_runoff_package(retained, *, controls_sha256, simulator_commit, args
         "Departure seeds are candidates, not safety criteria or occurrence predictions.",
         "Mallala reference geometry is approximate and not survey-grade or georeferenced.",
     )
-    return build_runoff_input_package(
+    package = build_runoff_input_package(
         runoff_columns, events, track_length_m=track.total_length_m,
         path_length_m=path_length_m, scenario_metadata=metadata, warnings=warnings)
+    _require_retained_seed_counts(package.departure_seeds)
+    return package
 
 
 def main(argv=None):
