@@ -80,6 +80,7 @@ def test_manifest_schema_order_counts_metadata_and_warnings():
     assert manifest["runoff_interface_version"] == "0.1.0"
     assert manifest["trajectory"]["fields"] == list(package.trajectory)
     assert manifest["trajectory"]["row_count"] == 6
+    assert "heading_rad" in manifest["trajectory"]["fields"]
     assert manifest["departure_seeds"]["fields"] == list(DEPARTURE_SEED_FIELDS)
     assert manifest["departure_seeds"]["count"] == 2
     assert manifest["departure_seeds"]["counts_by_source_event_type"] == {

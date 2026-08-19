@@ -149,6 +149,7 @@ def test_departure_seed_mapping_is_explicit_and_traceable():
         _event(columns, 2, "braking_onset"),
         _event(columns, 3, "turn_in"),
         _event(columns, 4, "geometric_apex"),
+        _event(columns, 5, "corner_exit"),
         _event(columns, 5, "positive_drive_pickup"),
         _event(columns, 6, "maximum_braking"),
     ]
@@ -158,11 +159,47 @@ def test_departure_seed_mapping_is_explicit_and_traceable():
         "upright_overrun_candidate",
         "entry_lowside_turn_in_candidate",
         "entry_lowside_apex_candidate",
+        "entry_lowside_corner_exit_candidate",
         "exit_highside_candidate",
     ]
     assert all(seed.source_rule == "synthetic reviewed event" for seed in seeds)
     assert all(seed.confidence == "high" for seed in seeds)
     assert all("candidate" in seed.interpretation for seed in seeds)
+
+
+def test_lowside_landmarks_match_trajectory_and_follow_corner_order():
+    columns = _columns()
+    package = build_runoff_input_package(
+        _clean_columns(columns),
+        [
+            _event(columns, 2, "turn_in"),
+            _event(columns, 3, "geometric_apex"),
+            _event(columns, 5, "corner_exit"),
+        ],
+        track_length_m=columns["_track_length_m"],
+        path_length_m=columns["_path_length_m"],
+        scenario_metadata=_valid_metadata(),
+    )
+    trajectory = package.trajectory
+    seeds = package.departure_seeds
+    assert [seed.sample_index for seed in seeds] == [2, 3, 5]
+    for seed in seeds:
+        index = seed.sample_index
+        comparisons = {
+            "track_s_m": "track_s_m",
+            "path_q_m": "path_q_m",
+            "x_m": "bike_x_m",
+            "y_m": "bike_y_m",
+            "heading_rad": "heading_rad",
+            "speed_mps": "speed_mps",
+            "longitudinal_acceleration_mps2": "longitudinal_acceleration_mps2",
+            "lateral_acceleration_mps2": "lateral_acceleration_signed_mps2",
+            "curvature_1pm": "path_curvature_1pm",
+            "lean_angle_rad": "roll_angle_rad",
+            "roll_rate_radps": "roll_rate_model_radps",
+        }
+        for seed_field, trajectory_field in comparisons.items():
+            assert getattr(seed, seed_field) == float(trajectory[trajectory_field][index])
 
 
 @pytest.mark.parametrize("field,delta", [
@@ -219,7 +256,12 @@ def test_package_has_closed_loop_lengths_provenance_and_strong_read_only_arrays(
     assert package.track_length_m == pytest.approx(columns["_track_length_m"])
     assert package.path_length_m == pytest.approx(columns["_path_length_m"])
     assert package.sampling_convention == "closed loop; duplicated endpoint omitted"
+    assert "heading_rad" in package.trajectory
     assert "path_heading_rad" in package.trajectory
+    assert np.array_equal(
+        package.trajectory["heading_rad"], package.trajectory["path_heading_rad"])
+    assert not package.trajectory["heading_rad"].flags.writeable
+    assert package.departure_seeds[0].heading_rad == package.trajectory["heading_rad"][2]
     assert package.departure_seeds[0].seed_type == "upright_overrun_candidate"
     assert package.warnings == ("synthetic data",)
     with pytest.raises(TypeError):

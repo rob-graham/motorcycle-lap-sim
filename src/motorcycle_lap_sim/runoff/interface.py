@@ -65,6 +65,10 @@ _EVENT_TO_SEED = {
         "entry_lowside_apex_candidate",
         "candidate fallen-rider departure state at the geometric-apex landmark",
     ),
+    "corner_exit": (
+        "entry_lowside_corner_exit_candidate",
+        "candidate fallen-rider departure state at the model-derived corner-exit landmark",
+    ),
     "positive_drive_pickup": (
         "exit_highside_candidate",
         "candidate exit departure state at the model-derived positive-drive pickup landmark",
@@ -359,18 +363,8 @@ def _validated_metadata(scenario_metadata):
     return raw
 
 
-def build_departure_seeds(columns, events, *, path_length_m):
-    """Build traceable departure candidates from supported simulation events.
-
-    Physical seed state is always taken from the validated trajectory. Event
-    copies are used only for index/provenance and stale-pair validation. A NaN
-    event roll-rate copy is permitted to mean that the event did not retain a
-    roll-rate value; the required trajectory roll-rate remains authoritative.
-    """
-    trajectory = _validated_trajectory(columns)
-    path_length = _validated_total_length(path_length_m, trajectory["path_q_m"], "path_length_m")
-    heading = derive_closed_path_heading_rad(
-        trajectory["bike_x_m"], trajectory["bike_y_m"], trajectory["path_q_m"], path_length)
+def _build_departure_seeds(trajectory, events, heading):
+    """Build seeds from one validated trajectory and its derived heading."""
     seeds = []
     counters = {}
     for event in events:
@@ -415,6 +409,23 @@ def build_departure_seeds(columns, events, *, path_length_m):
     return tuple(seeds)
 
 
+def build_departure_seeds(columns, events, *, path_length_m):
+    """Build traceable departure candidates from supported simulation events.
+
+    Physical seed state is always taken from the validated trajectory. Event
+    copies are used only for index/provenance and stale-pair validation. A NaN
+    event roll-rate copy is permitted to mean that the event did not retain a
+    roll-rate value; the required trajectory roll-rate remains authoritative.
+    """
+    trajectory = _validated_trajectory(columns)
+    path_length = _validated_total_length(
+        path_length_m, trajectory["path_q_m"], "path_length_m")
+    heading = derive_closed_path_heading_rad(
+        trajectory["bike_x_m"], trajectory["bike_y_m"],
+        trajectory["path_q_m"], path_length)
+    return _build_departure_seeds(trajectory, events, heading)
+
+
 def build_runoff_input_package(
         columns, events, *, track_length_m, path_length_m, scenario_metadata, warnings=()):
     """Create the current local-coordinate simulator-to-run-off hand-off."""
@@ -426,11 +437,13 @@ def build_runoff_input_package(
     heading = derive_closed_path_heading_rad(
         trajectory["bike_x_m"], trajectory["bike_y_m"], trajectory["path_q_m"], path_length)
     trajectory = dict(trajectory)
+    trajectory["heading_rad"] = heading
+    # Retain the original descriptive field as an additive compatibility alias.
     trajectory["path_heading_rad"] = heading
 
     metadata = _validated_metadata(scenario_metadata)
 
-    seeds = build_departure_seeds(columns, events, path_length_m=path_length)
+    seeds = _build_departure_seeds(trajectory, events, heading)
     warning_values = tuple(str(value) for value in warnings)
     return RunoffInputPackage(
         interface_version=RUNOFF_INTERFACE_VERSION,
