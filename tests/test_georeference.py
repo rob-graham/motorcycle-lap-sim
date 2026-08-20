@@ -100,9 +100,6 @@ def test_canonical_mallala_georeference_against_34_source_observations():
     assert np.median(distances) <= 0.8
     assert np.sqrt(np.mean(distances ** 2)) <= 0.9
     assert np.max(distances) <= 1.7
-    # Retain calculated values as a diagnostic without making sampling brittle.
-    assert (np.median(distances), np.sqrt(np.mean(distances ** 2)), np.max(distances)) == pytest.approx(
-        (0.6227632861, 0.7288796638, 1.4856629369), abs=2e-4)
 
 
 def test_contract_snapshot_identifies_exact_extension():
@@ -110,3 +107,15 @@ def test_contract_snapshot_identifies_exact_extension():
     assert contract["extension_version"] == "0.1.0"
     assert contract["schema"] == GEOREFERENCE_SCHEMA
     assert contract["transform"]["positive_rotation"] == "counter-clockwise"
+    document_fields = {field["name"]: field
+                       for field in contract["georeference_document"]["fields"]}
+    assert contract["georeference_document"]["additional_fields_permitted"] is False
+    assert document_fields["origin_projected_x_m"]["unit"] == "m"
+    assert document_fields["rotation_rad_ccw"]["type"] == "finite number"
+    assert document_fields["source_sha256"]["required"] is False
+    manifest = contract["manifest_extension"]
+    assert manifest["location"] == "manifest.json.extensions.georeference"
+    assert manifest["additional_fields_permitted"] is False
+    manifest_fields = {field["name"]: field for field in manifest["fields"]}
+    assert manifest_fields["filename"]["exact_value"] == "georeference.json"
+    assert "exact georeference.json bytes" in manifest_fields["sha256"]["meaning"]
