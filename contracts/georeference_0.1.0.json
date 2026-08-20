@@ -1,0 +1,40 @@
+{
+  "contract_id": "motorcycle-lap-sim/georeference/0.1.0",
+  "extension_version": "0.1.0",
+  "schema": "motorcycle-lap-sim-georeference/1",
+  "georeference_document": {
+    "additional_fields_permitted": false,
+    "fields": [
+      {"name": "schema", "required": true, "type": "string", "unit": "none", "meaning": "georeference document schema identifier", "exact_value": "motorcycle-lap-sim-georeference/1"},
+      {"name": "horizontal_crs", "required": true, "type": "non-empty string", "unit": "none", "meaning": "projected horizontal coordinate reference system identifier; recorded without online registry validation"},
+      {"name": "origin_projected_x_m", "required": true, "type": "finite number", "unit": "m", "meaning": "projected x coordinate corresponding to local Cartesian (0, 0)"},
+      {"name": "origin_projected_y_m", "required": true, "type": "finite number", "unit": "m", "meaning": "projected y coordinate corresponding to local Cartesian (0, 0)"},
+      {"name": "rotation_rad_ccw", "required": true, "type": "finite number", "unit": "rad", "meaning": "counter-clockwise rotation from local Cartesian axes to projected axes; accepted exactly and not normalised"},
+      {"name": "source", "required": true, "type": "non-empty string", "unit": "none", "meaning": "human-readable identity of the source used to establish the georeference"},
+      {"name": "status", "required": true, "type": "non-empty string", "unit": "none", "meaning": "producer-assigned provenance or authority status; not a survey-accuracy claim"},
+      {"name": "source_sha256", "required": false, "type": "non-empty string", "unit": "none", "meaning": "SHA-256 digest recorded for the source artifact"},
+      {"name": "derivation", "required": false, "type": "non-empty string", "unit": "none", "meaning": "human-readable description of how origin and rotation were derived"}
+    ]
+  },
+  "transform": {
+    "projected_x": "origin_projected_x_m + cos(rotation_rad_ccw) * local_x - sin(rotation_rad_ccw) * local_y",
+    "projected_y": "origin_projected_y_m + sin(rotation_rad_ccw) * local_x + cos(rotation_rad_ccw) * local_y",
+    "positive_rotation": "counter-clockwise",
+    "rotation_validation": "any finite value is accepted exactly and is not normalised",
+    "scale": "exactly 1; local and projected horizontal coordinates are metres"
+  },
+  "manifest_extension": {
+    "location": "manifest.json.extensions.georeference",
+    "additional_fields_permitted": false,
+    "fields": [
+      {"name": "extension_version", "required": true, "type": "string", "exact_value": "0.1.0"},
+      {"name": "schema", "required": true, "type": "string", "exact_value": "motorcycle-lap-sim-georeference/1"},
+      {"name": "filename", "required": true, "type": "string", "exact_value": "georeference.json"},
+      {"name": "sha256", "required": true, "type": "string", "meaning": "lowercase hexadecimal SHA-256 digest of the exact georeference.json bytes, including its single terminating LF"}
+    ]
+  },
+  "scope_excludes": [
+    "scale parameters", "skew", "affine fitting", "vertical datum", "height",
+    "terrain", "coordinate correction", "datum-transformation parameters"
+  ]
+}

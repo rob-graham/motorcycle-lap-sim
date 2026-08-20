@@ -84,7 +84,7 @@ Important closure caveats are:
 
 In particular, the retained closed-loop line bends toward the centre of the start/finish straight. That is a known modelling/optimisation artefact and must not be presented to riders as the recommended line. It does not block the run-off calculation work.
 
-## 5. Current active task - retained-Mallala run-off export acceptance
+## 5. Current active task - 2D LOWSIDE RIDER workflow through GIS/mapping
 
 Phase 12A's visual gate has been passed and the versioned `0.1.0` in-memory contract has been implemented. The bounded Phase 12B task now integrates that contract with the retained trajectory and reviewed event set and serializes a deterministic, portable bundle.
 
@@ -104,7 +104,16 @@ At minimum, the work should consider:
 
 The run-off contract must not silently convert coaching marks into safety criteria. Departure seeds should be derived and justified for run-off analysis, with coaching events used only where they provide a useful, traceable starting point.
 
-After successful Owner acceptance, the next task is the separate deterministic physical run-off package. Mapping/georeferencing and 3D terrain remain later work.
+The current Owner decision is to complete the first end-to-end track-layout/run-off workflow using
+the existing 2D LOWSIDE RIDER model and GIS/mapping before adding highside, upright overrun,
+motorcycle slide, ejection, or other crash models. This repository owns local geometry,
+trajectory, boundaries, and the optional authoritative local-to-projected georeference and its
+provenance. The downstream package must consume that transform consistently and create GIS
+outputs; it must not independently guess, fit, or reconstruct the Mallala transform.
+
+Local coordinates remain authoritative for simulation and georeferencing changes no physics.
+The SOURCE-DERIVED EPSG:7854 placement does not make the approximate analytical Mallala track
+survey-grade. GIS presentation is not certification, homologation, or external acceptance.
 
 ## 6. Current repository status relevant to review
 

@@ -12,12 +12,17 @@ from pathlib import Path
 import numpy as np
 
 from .interface import DepartureSeed, RunoffInputPackage
+from .georeference import (
+    GEOREFERENCE_EXTENSION_VERSION, GEOREFERENCE_SCHEMA, Georeference,
+    georeference_json_bytes,
+)
 
 
 RUNOFF_BUNDLE_VERSION = "1.0.0"
 TRAJECTORY_FILENAME = "trajectory.csv"
 DEPARTURE_SEEDS_FILENAME = "departure_seeds.csv"
 MANIFEST_FILENAME = "manifest.json"
+GEOREFERENCE_FILENAME = "georeference.json"
 
 DEPARTURE_SEED_FIELDS = tuple(field.name for field in fields(DepartureSeed))
 
@@ -47,8 +52,8 @@ def _sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def serialize_runoff_bundle(package):
-    """Return the three byte-stable bundle files without mutating ``package``."""
+def serialize_runoff_bundle(package, georeference=None):
+    """Return byte-stable bundle files, optionally with a georeference extension."""
     if not isinstance(package, RunoffInputPackage):
         raise TypeError("package must be a RunoffInputPackage")
     if not package.interface_version:
@@ -114,18 +119,34 @@ def serialize_runoff_bundle(package):
             "counts_by_source_event_type": dict(sorted(source_counts.items())),
         },
     }
+    georeference_bytes = None
+    if georeference is not None:
+        if not isinstance(georeference, Georeference):
+            raise TypeError("georeference must be a Georeference or None")
+        georeference_bytes = georeference_json_bytes(georeference)
+        manifest["extensions"] = {
+            "georeference": {
+                "extension_version": GEOREFERENCE_EXTENSION_VERSION,
+                "schema": GEOREFERENCE_SCHEMA,
+                "filename": GEOREFERENCE_FILENAME,
+                "sha256": _sha256(georeference_bytes),
+            }
+        }
     manifest_bytes = (json.dumps(
         manifest, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
-    return {
+    result = {
         MANIFEST_FILENAME: manifest_bytes,
         TRAJECTORY_FILENAME: trajectory_bytes,
         DEPARTURE_SEEDS_FILENAME: seed_bytes,
     }
+    if georeference_bytes is not None:
+        result[GEOREFERENCE_FILENAME] = georeference_bytes
+    return result
 
 
-def write_runoff_bundle(package, output_dir):
+def write_runoff_bundle(package, output_dir, georeference=None):
     """Write a deterministic directory bundle and return paths and hashes."""
-    files = serialize_runoff_bundle(package)
+    files = serialize_runoff_bundle(package, georeference)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     result = {}

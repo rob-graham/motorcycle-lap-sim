@@ -1,0 +1,11 @@
+{
+  "schema": "motorcycle-lap-sim-georeference/1",
+  "horizontal_crs": "EPSG:7854",
+  "origin_projected_x_m": 270778.8830383451,
+  "origin_projected_y_m": 6188979.605572527,
+  "rotation_rad_ccw": -3.124832428823087,
+  "source": "owner-supplied malalla_reference.gpkg",
+  "source_sha256": "ec933fa9ee54c508f392f8487514ab135cf0d15ce066c20551bbbbdd3abbd567",
+  "derivation": "origin is control point seq 1 'start finish'; rotation is the projected direction from seq 1 to seq 2 'end of start/finish straight'",
+  "status": "SOURCE-DERIVED"
+}

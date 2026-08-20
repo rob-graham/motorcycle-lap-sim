@@ -1,5 +1,6 @@
 import csv
 import io
+import hashlib
 import json
 import math
 from dataclasses import replace
@@ -124,3 +125,24 @@ def test_serialization_does_not_mutate_package():
 def test_malformed_nonfinite_manual_package_fails_closed(change, match):
     with pytest.raises(ValueError, match=match):
         serialize_runoff_bundle(change(_package()))
+
+
+def test_optional_georeference_extension_and_absence():
+    from motorcycle_lap_sim.runoff import parse_georeference
+    package = _package()
+    original = serialize_runoff_bundle(package)
+    assert set(original) == {"manifest.json", "trajectory.csv", "departure_seeds.csv"}
+    assert "extensions" not in json.loads(original["manifest.json"])
+    georeference = parse_georeference({
+        "schema": "motorcycle-lap-sim-georeference/1", "horizontal_crs": "EPSG:7854",
+        "origin_projected_x_m": 1, "origin_projected_y_m": 2, "rotation_rad_ccw": 0,
+        "source": "test", "status": "TEST",
+    })
+    extended = serialize_runoff_bundle(package, georeference)
+    assert set(extended) == set(original) | {"georeference.json"}
+    assert extended["trajectory.csv"] == original["trajectory.csv"]
+    assert extended["departure_seeds.csv"] == original["departure_seeds.csv"]
+    extension = json.loads(extended["manifest.json"])["extensions"]["georeference"]
+    assert extension["extension_version"] == "0.1.0"
+    assert extension["schema"] == "motorcycle-lap-sim-georeference/1"
+    assert extension["sha256"] == hashlib.sha256(extended["georeference.json"]).hexdigest()

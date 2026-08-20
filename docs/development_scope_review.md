@@ -67,4 +67,17 @@ At minimum, the interface work should define:
 
 The downstream interface must not treat coaching marks, optimiser controls, optimiser spread, or capability-limit classifications as safety criteria by default. Each run-off input must have an explicit engineering reason, definition, units, and provenance.
 
-After target-machine acceptance, the next bounded work is a separate deterministic physical run-off package. Off-track propagation, mapping/georeferencing and 3D terrain are not part of this simulator export increment.
+After target-machine acceptance, downstream physical run-off and GIS generation remain separate work. The producer-side optional rigid georeference is the only mapping capability added here; off-track propagation, GIS file output, and 3D terrain remain out of scope.
+
+## Current LOWSIDE-to-GIS sequencing decision
+
+The Owner's current priority is to complete the first end-to-end track-layout/run-off workflow
+using the existing 2D LOWSIDE RIDER model and GIS/mapping before implementing further crash
+models. Highside, upright overrun, motorcycle slide, ejection, terrain/3D, barriers, and GIS file
+presentation are outside the producer-side georeference increment.
+
+This repository owns authoritative local simulation geometry and the optional local-to-projected
+rigid transform plus provenance. The downstream run-off repository will consume—not guess, fit,
+or reconstruct—that transform and create GIS outputs. Local coordinates remain authoritative and
+georeferencing changes no physics. The approximate Mallala analytical geometry remains
+non-survey-grade even when positioned in EPSG:7854; mapping is not external acceptance.
