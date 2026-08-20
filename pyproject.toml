@@ -16,6 +16,7 @@ telemetry = ["openpyxl>=3.1"]
 accelerated = ["numba>=0.66,<0.67", "numpy<2.5"]
 
 [project.scripts]
+motorcycle-lap-sim = "motorcycle_lap_sim.cli:main"
 plot-example-track = "motorcycle_lap_sim.plotting.track_plot:main"
 fixed-path-diagnostics = "motorcycle_lap_sim.speed_solver.diagnostics:main"
 racing-line-diagnostics = "motorcycle_lap_sim.racing_line.diagnostics:main"

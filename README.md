@@ -4,6 +4,22 @@ A clean-sheet Python project for minimum-lap-time motorcycle simulation, racing-
 
 The repository has progressed beyond the original Phase 8 documentation. It now contains the frozen Mallala baseline, telemetry ingestion/registration/comparison tools, a simple switchable finite-roll sensitivity model, roll-aware re-optimisation diagnostics, and bounded optimisation-assurance checks.
 
+## Quick start — retained LOWSIDE producer bundle
+
+```bash
+python -m pip install -e .
+motorcycle-lap-sim --help
+motorcycle-lap-sim export runoff PATH_TO_CONTROLS.csv
+```
+
+The export writes to `runoff-bundle` beside the controls CSV by default and uses the
+committed Mallala georeference. Use `--output DIR` to select another directory or
+`--no-georeference` to intentionally produce a local-coordinate-only bundle.
+
+This retained Mallala command is an engineering/development workflow. Its trajectory
+is **not a recommended riding line**, and the resulting producer bundle is input to
+the separate `motorcycle-runoff` package.
+
 For review, start with:
 
 - [simulation project context and source hierarchy](docs/project_context.md);
