@@ -51,8 +51,9 @@ def test_runoff_defaults_and_canonical_settings(tmp_path, monkeypatch):
     controls.write_text("test", encoding="utf-8")
     captured = _capture_export(monkeypatch)
 
-    cli.main(["export", "runoff", str(controls)])
+    exit_code = cli.main(["export", "runoff", str(controls)])
 
+    assert exit_code == 0
     args = captured[0]
     assert args.output_dir == controls.parent / "runoff-bundle"
     assert args.georeference_json == (
@@ -64,6 +65,16 @@ def test_runoff_defaults_and_canonical_settings(tmp_path, monkeypatch):
     assert args.boundary_check_spacing_m == pytest.approx(0.125)
     assert args.expected_lap_s == pytest.approx(71.396583646)
     assert args.lap_tolerance_s == pytest.approx(2e-6)
+
+
+def test_success_does_not_return_export_package_as_console_exit_status(
+        tmp_path, monkeypatch):
+    controls = tmp_path / "controls.csv"
+    controls.write_text("test", encoding="utf-8")
+    package = object()
+    monkeypatch.setattr(retained_export, "run_export", lambda args: package)
+
+    assert cli.main(["export", "runoff", str(controls)]) == 0
 
 
 def test_output_and_georeference_overrides(tmp_path, monkeypatch):

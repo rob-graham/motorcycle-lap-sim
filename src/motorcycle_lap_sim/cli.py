@@ -87,9 +87,9 @@ def _run_runoff_export(args, parser):
     print(f"Controls: {args.representative_controls_csv}")
     print(f"Output: {args.output_dir}")
     print(f"Georeference: {args.georeference_json or 'disabled'}")
-    result = retained_export.run_export(args)
+    retained_export.run_export(args)
     print(f"Run-off bundle written: {args.output_dir}")
-    return result
+    return 0
 
 
 def main(argv=None):
