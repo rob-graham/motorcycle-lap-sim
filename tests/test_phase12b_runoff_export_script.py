@@ -93,3 +93,10 @@ def test_integration_assembly_fails_closed_on_incomplete_retained_trajectory():
         module.assemble_runoff_package(
             {"columns": {}}, controls_sha256=module.EXPECTED_CONTROLS_SHA256,
             simulator_commit="abc123", args=args)
+
+
+def test_parser_accepts_optional_georeference_path(tmp_path):
+    module = _load_script()
+    args = module.build_parser().parse_args([
+        "controls.csv", str(tmp_path), "--georeference-json", "track.georeference.json"])
+    assert args.georeference_json == Path("track.georeference.json")

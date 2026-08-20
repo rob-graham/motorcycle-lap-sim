@@ -1,0 +1,26 @@
+{
+  "contract_id": "motorcycle-lap-sim/georeference/0.1.0",
+  "extension_version": "0.1.0",
+  "schema": "motorcycle-lap-sim-georeference/1",
+  "required_fields": [
+    "schema",
+    "horizontal_crs",
+    "origin_projected_x_m",
+    "origin_projected_y_m",
+    "rotation_rad_ccw",
+    "source",
+    "status"
+  ],
+  "optional_provenance_fields": ["source_sha256", "derivation"],
+  "transform": {
+    "projected_x": "origin_projected_x_m + cos(rotation_rad_ccw) * local_x - sin(rotation_rad_ccw) * local_y",
+    "projected_y": "origin_projected_y_m + sin(rotation_rad_ccw) * local_x + cos(rotation_rad_ccw) * local_y",
+    "positive_rotation": "counter-clockwise",
+    "rotation_validation": "any finite value is accepted exactly and is not normalised",
+    "scale": "exactly 1; local and projected horizontal coordinates are metres"
+  },
+  "scope_excludes": [
+    "scale parameters", "skew", "affine fitting", "vertical datum", "height",
+    "terrain", "coordinate correction", "datum-transformation parameters"
+  ]
+}

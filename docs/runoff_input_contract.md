@@ -4,6 +4,8 @@
 **Interface version:** `0.1.0`
 **Bundle version:** `1.0.0`
 
+**Optional georeference extension version:** `0.1.0`
+
 ## Purpose
 
 This contract defines the simulator-side hand-off to a separate run-off calculation package. It transfers solved trajectory state and traceable candidate departure states. Run-off calculation assumptions remain downstream and are not embedded in the lap simulator.
@@ -12,14 +14,46 @@ The canonical machine-readable cross-repository contract snapshot is [`contracts
 
 The current ownership boundary is:
 
-- `motorcycle-lap-sim` owns solved trajectory state, simulator track-edge geometry, event provenance, and candidate departure-state extraction;
-- the separate run-off package will own off-track surface parameters, terrain propagation, stopping criteria, protection geometry, uncertainty treatment, and standards-comparison profiles.
+- `motorcycle-lap-sim` owns local track geometry, local racing-line trajectory, local track
+  boundaries, any authoritative local-to-projected georeference and its provenance, event
+  provenance, and candidate departure-state extraction;
+- the separate run-off package will consume the extension, transform all local run-off/site
+  geometry consistently, create GIS outputs, and own off-track surface parameters, terrain
+  propagation, stopping criteria, protection geometry, uncertainty treatment, and
+  standards-comparison profiles. It must not guess, fit, or reconstruct the Mallala transform.
 
 Candidate departure seeds are engineering starting points. They do not assert that a departure will occur there or that a selected point is the controlling case.
 
 ## Coordinates and chainage
 
 Version `0.1.0` uses local Cartesian metres. It does not invent a CRS, world transform, elevation, grade or banking when those data are not implemented.
+
+Local coordinates remain authoritative for numerical simulation. An optional, separately
+versioned georeference maps them into a projected horizontal CRS without changing trajectory
+values, physics, scale, or the local coordinate convention. A bundle without the extension
+remains a valid three-file version `1.0.0` bundle.
+
+## Optional rigid georeference extension
+
+The canonical snapshot is
+[`contracts/georeference_0.1.0.json`](../contracts/georeference_0.1.0.json). Extension `0.1.0`
+uses schema `motorcycle-lap-sim-georeference/1` and requires `schema`, `horizontal_crs`,
+`origin_projected_x_m`, `origin_projected_y_m`, `rotation_rad_ccw`, `source`, and `status`.
+`source_sha256` and `derivation` are optional provenance. Rotation accepts any finite value
+exactly; it is not silently normalised. CRS strings are recorded but are not checked against an
+online EPSG database.
+
+For `theta = rotation_rad_ccw`, positive counter-clockwise rotation is applied without a GIS
+library:
+
+```text
+projected_x = origin_projected_x_m + cos(theta)*local_x - sin(theta)*local_y
+projected_y = origin_projected_y_m + sin(theta)*local_x + cos(theta)*local_y
+```
+
+When supplied, deterministic `georeference.json` is described under
+`manifest.json.extensions.georeference`, including extension version, schema, filename, and
+SHA-256. It is deliberately absent from the immutable interface `0.1.0` artifact list.
 
 Two distance coordinates are retained:
 
@@ -94,7 +128,11 @@ Residual-speed-at-barrier criteria, including any future 24 km/h case, must ther
 
 The active gate is the bounded retained-Mallala integration export using the retained trajectory and generated Phase 12A event set. The retained acceptance identity is fail-closed: its fixed controls SHA-256 and canonical deleted-control index, margin, roll-rate scenario, sampling settings, expected lap and reproduction tolerance cannot be overridden by a caller. It verifies total-length and wrap semantics, content-derived event-set provenance, candidate counts/types and representative fields. Phase 12B must not be treated as finally closed until the Owner successfully executes that command on the target machine.
 
-After that, begin a separate deterministic run-off calculation core with named profiles and analytically checkable tests. The first physical calculations will use a final speed of zero. Surface/terrain propagation, protection-geometry intersection and any non-zero barrier residual-speed criteria will then be added as separately reviewable increments, followed by standards comparison, georeferencing and 3D terrain fields.
+The current Owner decision is to complete the first end-to-end track-layout/run-off workflow using
+the existing 2D LOWSIDE RIDER model and GIS/mapping before adding further crash models. GIS output
+itself remains downstream. EPSG:7854 positioning does not make Mallala's approximate analytical
+track survey-grade, and GIS presentation is not certification, homologation, or external
+acceptance.
 
 ## Interpretation boundary
 

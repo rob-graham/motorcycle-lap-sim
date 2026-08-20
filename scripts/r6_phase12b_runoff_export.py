@@ -14,6 +14,7 @@ from motorcycle_lap_sim.runoff import (
     RUNOFF_BUNDLE_VERSION,
     RUNOFF_INTERFACE_VERSION,
     build_runoff_input_package,
+    load_georeference,
     write_runoff_bundle,
 )
 
@@ -54,6 +55,7 @@ def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("representative_controls_csv", type=Path)
     parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--georeference-json", type=Path)
     parser.add_argument("--delete-index", type=int, default=phase12a.DEFAULT_DELETE_INDEX)
     parser.add_argument("--margin-m", type=phase12a._nonnegative_float,
                         default=phase12a.DEFAULT_MARGIN_M)
@@ -129,7 +131,8 @@ def _require_retained_seed_counts(departure_seeds):
             f"corner_exit={actual_exits} expected={EXPECTED_CORNER_EXIT_SEED_COUNT}")
 
 
-def assemble_runoff_package(retained, *, controls_sha256, simulator_commit, args):
+def assemble_runoff_package(retained, *, controls_sha256, simulator_commit, args,
+                            georeference=None):
     """Assemble the real retained-case interface package from Phase 12A output."""
     _require_retained_acceptance_provenance(args, controls_sha256)
     columns = retained["columns"]
@@ -158,11 +161,17 @@ def assemble_runoff_package(retained, *, controls_sha256, simulator_commit, args
         "boundary_check_spacing_m": format(args.boundary_check_spacing_m, ".17g"),
         "speed_backend": "python",
     }
+    positioning_warning = (
+        "Mallala reference geometry is approximate and not survey-grade; world positioning "
+        f"uses the {georeference.status} {georeference.horizontal_crs} georeference extension."
+        if georeference is not None else
+        "Mallala reference geometry is approximate and not survey-grade or georeferenced."
+    )
     warnings = (
         "INTERNAL-PROTOTYPE; NOT-EXTERNALLY-ACCEPTED",
         "Retained path is an engineering analysis trajectory, not a recommended riding line.",
         "Departure seeds are candidates, not safety criteria or occurrence predictions.",
-        "Mallala reference geometry is approximate and not survey-grade or georeferenced.",
+        positioning_warning,
     )
     package = build_runoff_input_package(
         runoff_columns, events, track_length_m=track.total_length_m,
@@ -176,16 +185,22 @@ def main(argv=None):
     controls_hash = _sha256_file(args.representative_controls_csv)
     _require_retained_acceptance_provenance(args, controls_hash)
     retained = phase12a.calculate_retained_case(args)
+    georeference = (load_georeference(args.georeference_json)
+                    if args.georeference_json is not None else None)
     commit = _git_commit()
     package = assemble_runoff_package(
-        retained, controls_sha256=controls_hash, simulator_commit=commit, args=args)
-    files = write_runoff_bundle(package, args.output_dir)
+        retained, controls_sha256=controls_hash, simulator_commit=commit, args=args,
+        georeference=georeference)
+    files = write_runoff_bundle(package, args.output_dir, georeference)
     source_counts = Counter(seed.source_event_type for seed in package.departure_seeds)
     seed_counts = Counter(seed.seed_type for seed in package.departure_seeds)
     event_counts = Counter(event.event_type for event in retained["events"])
     print("phase=12B_retained_mallala_runoff_export")
     print(f"runoff_interface_version={RUNOFF_INTERFACE_VERSION}")
     print(f"runoff_bundle_version={RUNOFF_BUNDLE_VERSION}")
+    if georeference is not None:
+        print(f"georeference_schema={georeference.schema}")
+        print(f"georeference_horizontal_crs={georeference.horizontal_crs}")
     print(f"simulator_commit={commit}")
     print(f"representative_controls_sha256={controls_hash}")
     print(f"lap_s={retained['evaluation'].lap_time_s:.9f}")

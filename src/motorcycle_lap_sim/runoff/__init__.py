@@ -19,6 +19,15 @@ from .export import (
     serialize_runoff_bundle,
     write_runoff_bundle,
 )
+from .georeference import (
+    GEOREFERENCE_EXTENSION_VERSION,
+    GEOREFERENCE_SCHEMA,
+    Georeference,
+    georeference_json_bytes,
+    load_georeference,
+    local_xy_to_projected_xy,
+    parse_georeference,
+)
 
 __all__ = [
     "RUNOFF_INTERFACE_VERSION",
@@ -31,4 +40,11 @@ __all__ = [
     "RUNOFF_BUNDLE_VERSION",
     "serialize_runoff_bundle",
     "write_runoff_bundle",
+    "GEOREFERENCE_EXTENSION_VERSION",
+    "GEOREFERENCE_SCHEMA",
+    "Georeference",
+    "georeference_json_bytes",
+    "load_georeference",
+    "local_xy_to_projected_xy",
+    "parse_georeference",
 ]

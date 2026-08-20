@@ -111,4 +111,15 @@ This interface should be designed around downstream run-off engineering needs an
 
 The interface must not silently convert coaching marks or optimiser outputs into safety criteria. Run-off departure seeds and downstream calculations require their own explicit engineering rules and provenance. Phase 12B is not finally closed until the Owner's retained-case target-machine command succeeds; deterministic physical propagation remains a separate downstream package.
 
-Future roadmap work also includes GIS/georeferencing and a reusable 3D `TrackSurface` / `z(s,n)` interface with grade/banking. Those remain future capability unless current repository code and tests explicitly implement them.
+The optional producer-side rigid georeference is implemented as documented below. GIS file generation and a reusable 3D `TrackSurface` / `z(s,n)` interface with grade/banking remain future capability.
+
+## Optional producer georeferencing boundary
+
+The numerical solver continues to use authoritative local Cartesian metres. The optional
+`motorcycle-lap-sim-georeference/1` extension is a pure rigid translation and counter-clockwise
+rotation into a named projected horizontal CRS; it changes neither local geometry nor physics.
+`motorcycle-lap-sim` owns the local track, racing line, boundaries, authoritative transform, and
+transform provenance. The downstream run-off package will consume the extension, transform all
+site/run-off geometry consistently, and create GIS outputs. It must not independently reconstruct
+Mallala positioning. EPSG:7854 placement does not make the approximate analytical track
+survey-grade, and GIS output is not certification, homologation, or external acceptance.
