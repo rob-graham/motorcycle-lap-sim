@@ -1,8 +1,8 @@
 # Owner, ChatGPT and Codex collaboration workflow
 
-**Workflow version:** 1.0  
-**Status:** recommended repository workflow  
-**Audience:** Owner, ChatGPT, Codex Cloud, Codex desktop/local, and independent reviewers
+- **Workflow version:** 1.0
+- **Status:** Recommended repository workflow
+- **Audience:** Owner, ChatGPT, Codex Cloud, Codex desktop/local, and independent reviewers
 
 This document expands the stable rules in `AGENTS.md`. It is a working procedure, not a substitute for task-specific technical judgement.
 
