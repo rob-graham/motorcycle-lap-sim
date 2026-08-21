@@ -41,7 +41,7 @@ Preserve the modular separation of track geometry and boundaries, racing-line/pa
 
 Measured data must not become a hidden dependency of the physics solver. Coaching/event extraction consumes solved state and does not alter physics or optimisation.
 
-The wider project also contains future workstreams for three-dimensional track-surface/LiDAR processing, GIS export, and run-off calculations. The physical run-off calculation remains a separate package. Phase 12A is closed and the Phase 12B `0.1.0` in-memory interface exists; the active gate is retained-Mallala integration and deterministic file serialization.
+The wider project also contains future workstreams for three-dimensional track-surface/LiDAR processing, GIS export, and run-off calculations. The physical run-off calculation remains a separate package. Phase 12A is closed; Phase 12B producer export target-machine acceptance succeeded and PR #80 was merged after independent review.
 
 ## 4. Closed simulator phases
 
@@ -86,9 +86,9 @@ In particular, the retained closed-loop line bends toward the centre of the star
 
 ## 5. Current active task - 2D LOWSIDE RIDER workflow through GIS/mapping
 
-Phase 12A's visual gate has been passed and the versioned `0.1.0` in-memory contract has been implemented. The bounded Phase 12B task now integrates that contract with the retained trajectory and reviewed event set and serializes a deterministic, portable bundle.
+Phase 12A's visual gate has passed, and the versioned `0.1.0` in-memory contract and deterministic retained-case producer bundle have passed target-machine acceptance. Wider physical run-off propagation and GIS generation remain downstream work.
 
-The interface is driven by the separate run-off package's engineering needs rather than by rider-facing presentation. Target-machine acceptance must reproduce the retained lap, validate wrap/length and event correspondence, and record exact provenance before this integration/export gate or Phase 12B is called closed.
+The interface is driven by the separate run-off package's engineering needs rather than by rider-facing presentation. The current generic optimise-command task is a release/productisation interface around the existing direct-planar method; it adds no optimisation assurance and does not replace the retained Mallala line.
 
 At minimum, the work should consider:
 
