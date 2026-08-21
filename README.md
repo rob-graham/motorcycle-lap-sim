@@ -1,24 +1,30 @@
 # Motorcycle Lap Simulation
 
-A clean-sheet Python project for minimum-lap-time motorcycle simulation, racing-line optimisation, and Mallala R6 validation development.
+A clean-sheet Python tool for deterministic fixed-path motorcycle simulation and local racing-line optimisation. Supply a supported analytic track YAML and motorcycle YAML to generate physical lateral controls in SI units.
 
-The repository has progressed beyond the original Phase 8 documentation. It now contains the frozen Mallala baseline, telemetry ingestion/registration/comparison tools, a simple switchable finite-roll sensitivity model, roll-aware re-optimisation diagnostics, and bounded optimisation-assurance checks.
-
-## Quick start — retained LOWSIDE producer bundle
+## Install and run the supplied oval
 
 ```bash
 python -m pip install -e .
 motorcycle-lap-sim --help
-motorcycle-lap-sim export runoff PATH_TO_CONTROLS.csv
+motorcycle-lap-sim optimise examples/tracks/test_oval.yaml examples/motorcycles/test_motorcycle.yaml --policy fine --max-sweeps 1 --max-evaluations 100 --output oval_controls.csv
 ```
 
-The export writes to `runoff-bundle` beside the controls CSV by default and uses the
-committed Mallala georeference. Use `--output DIR` to select another directory or
-`--no-georeference` to intentionally produce a local-coordinate-only bundle.
+The example motorcycle is synthetic validation data, not a real motorcycle. This deliberately bounded smoke run completes one fine-policy poll; limit termination is not convergence. The command performs a deterministic **local** direct-planar optimisation, not proof of a global fastest line. To use your own supported files:
 
-This retained Mallala command is an engineering/development workflow. Its trajectory
-is **not a recommended riding line**, and the resulting producer bundle is input to
-the separate `motorcycle-runoff` package.
+```bash
+motorcycle-lap-sim optimise my_track.yaml my_motorcycle.yaml --output my_controls.csv
+```
+
+See the practical **[user guide](docs/user_guide.md)** for Windows and POSIX setup, input guidance, options, the controls schema, Numba acceleration, Mallala cautions, and troubleshooting.
+
+## Separate retained Mallala run-off workflow
+
+`motorcycle-lap-sim export runoff PATH_TO_CONTROLS.csv` remains a specialised, provenance-controlled retained Mallala LOWSIDE producer workflow. A generic controls CSV is not automatically valid for that command. The retained trajectory is **not a recommended riding line**, and its bundle is input to the separate `motorcycle-runoff` package. See the user guide for the explicit workflow boundary.
+
+## Engineering and development documentation
+
+The repository also contains the frozen Mallala baseline, telemetry ingestion/registration/comparison tools, a switchable finite-roll sensitivity model, roll-aware re-optimisation diagnostics, and bounded optimisation-assurance checks.
 
 For review, start with:
 

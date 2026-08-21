@@ -1,8 +1,8 @@
 # Development scope review
 
-**Review date:** 2026-08-18
+**Review date:** 2026-08-21
 
-This review records the bounded development sequence through Phase 12A and the active Phase 12B retained-Mallala export gate.
+This review records the bounded development sequence through accepted Phase 12B producer export and the current generic optimise-command productisation task.
 
 ## Closed decisions retained
 
@@ -48,11 +48,11 @@ Further optimisation work requires a downstream finding that the retained repres
 
 Further coaching/rider-facing refinement requires a separate purpose, such as multi-rider review, improved rider/control modelling, or a need to publish validated rider guidance. It is not required merely to continue the engineering run-off workflow.
 
-## Active bounded task: retained-Mallala integration and serialization
+## Accepted retained-Mallala integration and serialization
 
-The Phase 12A visual gate has passed, and the Phase 12B `0.1.0` in-memory simulator-to-run-off contract and candidate departure workflow already exist. The active increment integrates the retained Mallala trajectory and reviewed event set and adds a separately versioned deterministic directory bundle.
+The Phase 12B `0.1.0` in-memory simulator-to-run-off contract, retained Mallala integration, candidate departure workflow, and separately versioned deterministic directory bundle are implemented. Owner target-machine acceptance succeeded and PR #80 was merged after independent review.
 
-This integration must validate the retained lap, total-length/wrap semantics, event/trajectory correspondence, provenance, candidate counts and serialization on the Owner's target machine. Phase 12B remains open until that command succeeds.
+That acceptance validated the retained lap, total-length/wrap semantics, event/trajectory correspondence, provenance, candidate counts and serialization. Wider physical run-off and GIS work is not thereby complete.
 
 At minimum, the interface work should define:
 
@@ -68,6 +68,10 @@ At minimum, the interface work should define:
 The downstream interface must not treat coaching marks, optimiser controls, optimiser spread, or capability-limit classifications as safety criteria by default. Each run-off input must have an explicit engineering reason, definition, units, and provenance.
 
 After target-machine acceptance, downstream physical run-off and GIS generation remain separate work. The producer-side optional rigid georeference is the only mapping capability added here; off-track propagation, GIS file output, and 3D terrain remain out of scope.
+
+## Current bounded task: generic optimise command
+
+The user-facing command is a release/productisation interface around the existing direct-planar method. It changes neither optimisation assurance nor numerical defaults, and a newly generated generic controls file does not replace the retained Mallala representative or bypass its downstream provenance requirements.
 
 ## Current LOWSIDE-to-GIS sequencing decision
 

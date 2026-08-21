@@ -23,6 +23,7 @@ from motorcycle_lap_sim.optimisation import (
     optimise_planar_racing_line,
     planar_control_bounds,
     resample_planar_result,
+    write_planar_controls_csv,
 )
 from motorcycle_lap_sim.path import from_sampled_track
 from motorcycle_lap_sim.speed_solver import solve_speed_profile
@@ -405,12 +406,7 @@ def plot_offsets(track, zero, result, policy_name, boundary_margin_m, output):
 
 
 def export_controls(result, output):
-    with output.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(("index", "control_s_m", "best_offset_m", "lower_bound_m", "upper_bound_m"))
-        for index, values in enumerate(zip(result.control_s_m, result.best_controls_m,
-                                           result.lower_bounds_m, result.upper_bounds_m)):
-            writer.writerow((index, *values))
+    write_planar_controls_csv(output, result)
 
 
 def report_extra_fine(track, bike, centre_lap_s):

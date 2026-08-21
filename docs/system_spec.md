@@ -94,9 +94,9 @@ The measured rider line is validation evidence, not the optimiser objective. The
 
 The Mallala geometry is approximate rather than survey-grade, and the provisional R6 model remains incompletely identified.
 
-## Active Phase 12B gate - retained-Mallala run-off export
+## Phase 12B retained-Mallala run-off export
 
-Phase 12A's numerical and visual review is closed. The Phase 12B `0.1.0` in-memory simulator-to-run-off interface is implemented; the active task integrates it with retained Mallala and provides separately versioned deterministic CSV/JSON serialization.
+Phase 12A's numerical and visual review is closed. The Phase 12B `0.1.0` in-memory simulator-to-run-off interface and separately versioned deterministic CSV/JSON serialization are implemented. Owner target-machine acceptance succeeded and PR #80 was merged after independent review.
 
 This interface should be designed around downstream run-off engineering needs and should explicitly define:
 
@@ -109,7 +109,7 @@ This interface should be designed around downstream run-off engineering needs an
 - coordinate-system and version metadata; and
 - the boundary between simulator-derived quantities and assumptions owned by the separate run-off package.
 
-The interface must not silently convert coaching marks or optimiser outputs into safety criteria. Run-off departure seeds and downstream calculations require their own explicit engineering rules and provenance. Phase 12B is not finally closed until the Owner's retained-case target-machine command succeeds; deterministic physical propagation remains a separate downstream package.
+The interface must not silently convert coaching marks or optimiser outputs into safety criteria. Run-off departure seeds and downstream calculations require their own explicit engineering rules and provenance. Deterministic physical propagation remains a separate downstream package. The generic optimise command productises the existing direct-planar method; it is not new optimisation assurance and does not replace the retained Mallala line.
 
 The optional producer-side rigid georeference is implemented as documented below. GIS file generation and a reusable 3D `TrackSurface` / `z(s,n)` interface with grade/banking remain future capability.
 

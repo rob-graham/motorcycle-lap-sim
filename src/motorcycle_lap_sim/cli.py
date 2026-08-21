@@ -2,9 +2,52 @@
 
 import argparse
 from importlib.metadata import version
+import math
 from pathlib import Path
 
+from motorcycle_lap_sim.motorcycle import load_motorcycle_config
+from motorcycle_lap_sim.optimisation import (
+    COARSE_PLANAR_CONTROL_POLICY, FINE_PLANAR_CONTROL_POLICY,
+    REFERENCE_PLANAR_CONTROL_POLICY, PlanarOptimisationConfig,
+    optimise_planar_racing_line, write_planar_controls_csv)
 from motorcycle_lap_sim.runoff import retained_export
+from motorcycle_lap_sim.track import Track
+
+
+_PLANAR_POLICIES = {
+    "coarse": COARSE_PLANAR_CONTROL_POLICY,
+    "reference": REFERENCE_PLANAR_CONTROL_POLICY,
+    "fine": FINE_PLANAR_CONTROL_POLICY,
+}
+_PLANAR_DEFAULTS = PlanarOptimisationConfig()
+
+
+def _positive_float(value):
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be finite and positive")
+    return parsed
+
+
+def _nonnegative_float(value):
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be finite and non-negative")
+    return parsed
+
+
+def _step_reduction(value):
+    parsed = float(value)
+    if not math.isfinite(parsed) or not 0 < parsed < 1:
+        raise argparse.ArgumentTypeError("must be finite and between zero and one")
+    return parsed
+
+
+def _positive_int(value):
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _repository_root():
@@ -20,14 +63,46 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="motorcycle-lap-sim",
         description="Motorcycle lap simulation engineering workflows.",
-        epilog=("Current user-facing workflow: export runoff. Example: "
-                "motorcycle-lap-sim export runoff PATH_TO_CONTROLS.csv\n"
+        epilog=("Optimise any supported track and motorcycle: motorcycle-lap-sim "
+                "optimise TRACK.yaml MOTORCYCLE.yaml\n"
                 "Additional engineering diagnostics remain available as separate commands."),
     )
     parser.add_argument(
         "--version", action="version",
         version=f"%(prog)s {version('motorcycle-lap-sim')}")
     commands = parser.add_subparsers(dest="command", required=True)
+
+    optimise = commands.add_parser(
+        "optimise", help="Run deterministic local direct-planar optimisation")
+    optimise.add_argument("track", type=Path, metavar="TRACK.yaml")
+    optimise.add_argument("motorcycle", type=Path, metavar="MOTORCYCLE.yaml")
+    optimise.add_argument("--output", type=Path, metavar="CONTROLS.csv")
+    optimise.add_argument("--policy", choices=tuple(_PLANAR_POLICIES), default="reference")
+    advanced_optimise = optimise.add_argument_group("advanced optimisation options")
+    advanced_optimise.add_argument("--initial-step-m", type=_positive_float,
+                                   default=_PLANAR_DEFAULTS.initial_step_m)
+    advanced_optimise.add_argument("--minimum-step-m", type=_positive_float,
+                                   default=_PLANAR_DEFAULTS.minimum_step_m)
+    advanced_optimise.add_argument("--step-reduction", type=_step_reduction,
+                                   default=_PLANAR_DEFAULTS.step_reduction)
+    advanced_optimise.add_argument(
+        "--lap-time-improvement-tolerance-s", type=_nonnegative_float,
+        default=_PLANAR_DEFAULTS.lap_time_improvement_tolerance_s)
+    advanced_optimise.add_argument("--max-sweeps", type=_positive_int,
+                                   default=_PLANAR_DEFAULTS.max_sweeps)
+    advanced_optimise.add_argument("--max-evaluations", type=_positive_int,
+                                   default=_PLANAR_DEFAULTS.max_evaluations)
+    advanced_optimise.add_argument("--boundary-margin-m", type=_nonnegative_float,
+                                   default=_PLANAR_DEFAULTS.boundary_margin_m)
+    advanced_optimise.add_argument("--boundary-check-spacing-m", type=_positive_float,
+                                   default=_PLANAR_DEFAULTS.boundary_check_spacing_m)
+    advanced_optimise.add_argument("--optimisation-sample-spacing-m", type=_positive_float,
+                                   default=_PLANAR_DEFAULTS.optimisation_sample_spacing_m)
+    advanced_optimise.add_argument("--workers", type=_positive_int,
+                                   default=_PLANAR_DEFAULTS.parallel_workers)
+    advanced_optimise.add_argument("--speed-backend", choices=("python", "numba"),
+                                   default=_PLANAR_DEFAULTS.speed_backend)
+    optimise.set_defaults(handler=_run_optimise)
 
     export = commands.add_parser("export", help="Export simulator results")
     export_commands = export.add_subparsers(dest="export_command", required=True)
@@ -65,6 +140,46 @@ def build_parser():
         default=retained_export.phase12a.DEFAULT_LAP_TOLERANCE_S)
     runoff.set_defaults(handler=_run_runoff_export)
     return parser
+
+
+def _run_optimise(args, parser):
+    track_file = args.track.expanduser().resolve()
+    motorcycle_file = args.motorcycle.expanduser().resolve()
+    if not track_file.is_file():
+        parser.error(f"track file does not exist: {track_file}")
+    if not motorcycle_file.is_file():
+        parser.error(f"motorcycle file does not exist: {motorcycle_file}")
+    output = ((Path.cwd() / f"{track_file.stem}_controls.csv").resolve()
+              if args.output is None else args.output.expanduser().resolve())
+    config = PlanarOptimisationConfig(
+        initial_step_m=args.initial_step_m, minimum_step_m=args.minimum_step_m,
+        step_reduction=args.step_reduction,
+        lap_time_improvement_tolerance_s=args.lap_time_improvement_tolerance_s,
+        max_sweeps=args.max_sweeps, max_evaluations=args.max_evaluations,
+        boundary_margin_m=args.boundary_margin_m,
+        boundary_check_spacing_m=args.boundary_check_spacing_m,
+        optimisation_sample_spacing_m=args.optimisation_sample_spacing_m,
+        parallel_workers=args.workers, speed_backend=args.speed_backend)
+    track = Track.from_yaml(track_file)
+    motorcycle = load_motorcycle_config(motorcycle_file)
+    result = optimise_planar_racing_line(
+        track, motorcycle, _PLANAR_POLICIES[args.policy], config)
+    write_planar_controls_csv(output, result)
+    print("Deterministic LOCAL optimisation complete; this is not proof of a global fastest line.")
+    print(f"Track: {track_file}")
+    print(f"Motorcycle: {motorcycle_file}")
+    print(f"Controls output: {output}")
+    print(f"Control policy: {args.policy}")
+    print(f"Control count: {len(result.control_s_m)}")
+    print(f"Speed backend: {config.speed_backend}; workers: {config.parallel_workers}")
+    print(f"Initial lap time: {result.initial_lap_time_s:.9f} s")
+    print(f"Optimised lap time: {result.best_lap_time_s:.9f} s")
+    print(f"Improvement: {result.improvement_s:.9f} s")
+    print(f"Evaluations: {result.evaluations}; sweeps: {result.sweeps}")
+    print(f"Final step: {result.final_step_m:.9f} m")
+    print(f"Termination reason: {result.termination_reason}")
+    print(f"Minimum boundary clearance: {result.minimum_boundary_clearance_m:.9f} m")
+    return 0
 
 
 def _run_runoff_export(args, parser):
