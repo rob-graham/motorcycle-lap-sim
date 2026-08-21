@@ -25,21 +25,21 @@
 
 <!-- Identify behaviour, baselines, schemas, and contracts that must remain unchanged. -->
 
-## Required capabilities
+## Capability preflight
 
-- [ ] GitHub read/write
-- [ ] Repository execution
-- [ ] Dependency installation
-- [ ] Windows/target machine
-- [ ] Proprietary Mallala data or retained artefacts
-- [ ] GIS/QGIS/GDAL
-- [ ] Long-running optimisation
-- [ ] Owner visual review
-- [ ] Other repository access
+For every row, set **Required** to `Yes` or `No`, and set **Availability** to `Available`, `Unavailable`, `Owner-only`, or `N/A`.
 
-Unavailable or Owner-only capabilities:
-
-<!-- Identify unavailable capabilities and the person or environment responsible for each hand-off. -->
+| Capability | Required (`Yes` / `No`) | Availability (`Available` / `Unavailable` / `Owner-only` / `N/A`) | Evidence, environment, or hand-off owner |
+| --- | --- | --- | --- |
+| GitHub read/write | | | |
+| Repository execution | | | |
+| Dependency installation | | | |
+| Windows/target machine | | | |
+| Proprietary Mallala data or retained artefacts | | | |
+| GIS/QGIS/GDAL | | | |
+| Long-running optimisation | | | |
+| Owner visual review | | | |
+| Other repository access | | | |
 
 ## Acceptance criteria
 
