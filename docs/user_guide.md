@@ -59,16 +59,21 @@ Copy the supplied YAML examples and edit only supported fields. Track files desc
 
 The optimiser depends on its starting line, control policy and defaults. `--policy {coarse,reference,fine}` changes the physical control basis; `reference` is the default. Run `motorcycle-lap-sim optimise --help` for advanced options including step, tolerance, search budgets, margin, sampling, workers and backend. These expose the existing method without changing its defaults.
 
-### Optional Numba acceleration
+### Multicore and optional Numba acceleration
 
-Python is the authoritative default. Install and select the optional validated backend with:
+The deliberate defaults are `--workers 1` and `--speed-backend python`; they must not be changed. Python remains the authoritative reference backend. For substantive optimisation on a multicore machine, select a suitable worker count explicitly, for example `--workers 8`. With the accelerated extra installed, `--speed-backend numba` may be selected as well:
 
 ```bash
 python -m pip install -e '.[accelerated]'
-motorcycle-lap-sim optimise TRACK.yaml MOTORCYCLE.yaml --speed-backend numba
 ```
 
-If Numba is unavailable or disagrees with authoritative validation, the existing error behaviour is retained; the command does not silently fall back.
+For example, from the repository root on Windows:
+
+```powershell
+.\motorcycle-lap-sim.cmd optimise TRACK.yaml MOTORCYCLE.yaml --workers 8 --speed-backend numba --output controls.csv
+```
+
+Worker processes and Numba can reduce runtime, but neither 100% CPU utilisation nor linear speed-up is promised. Numba retains its existing accepted-result validation against the authoritative Python result. If Numba is unavailable or disagrees with that validation, the existing error behaviour is retained; the command does not silently fall back.
 
 ## General optimisation versus retained run-off export
 
