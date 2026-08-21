@@ -26,6 +26,7 @@ When sources conflict, stop and ask the Owner or record the conflict in the task
 ## 3. Engineering invariants
 
 - This is a clean-sheet implementation. Do not import old lap-time simulator source code unless explicitly requested.
+- Build and validate fixed-path simulation before racing-line optimisation.
 - Use SI units internally.
 - Physical formulas belong in clearly identified functions or modules.
 - Do not use mutable module-level global state.
