@@ -1,397 +1,425 @@
 # Owner, ChatGPT and Codex collaboration workflow
 
-**Status:** recommended repository workflow
-**Audience:** repository Owner, ChatGPT, Codex, and external reviewers
+- **Workflow version:** 1.0
+- **Status:** Recommended repository workflow
+- **Audience:** Owner, ChatGPT, Codex Cloud, Codex desktop/local, and independent reviewers
 
-## 1. Objective
+This document expands the stable rules in `AGENTS.md`. It is a working procedure, not a substitute for task-specific technical judgement.
 
-The workflow is designed to prevent two common failure modes:
+## 1. Objectives
 
-1. a change is accepted because unit tests pass even though its real entry point fails; and
-2. two people or agents edit the same branch or files and create avoidable merge conflicts.
+The workflow is designed to:
 
-The central rule is **one task, one change set, one active Implementer**. Every task must
-explicitly name its **Implementer** and **Reviewer**. Either ChatGPT or Codex may fill either role,
-depending on access and capability, but the same participant should not fill both roles for a
-non-trivial change. Other participants may reproduce or advise, but they do not push competing
-edits to the change set unless the Owner explicitly transfers the Implementer role.
+- keep one unambiguous active change set and Implementer;
+- scale assurance to the consequence of the change;
+- expose real runtime and user-visible behaviour early;
+- let intermediate results change the plan without losing provenance;
+- prevent one participant from assigning another a gate it cannot perform;
+- keep chat history from becoming the only record of a decision; and
+- make two-repository work and Codex Cloud branch limitations explicit.
 
-### Source precedence
+The default sequence is **brief -> thin vertical slice -> Owner draft gate -> hardening -> independent review -> exact-head merge gate**. Experiments may stop before production hardening.
 
-Current `main` repository documentation and `AGENTS.md` govern current implementation state,
-phase status, and the next repository task. ChatGPT Project snapshot files remain useful for the
-wider roadmap direction unless a current project decision deliberately supersedes them. A task
-prompt may narrow a change, but should not silently override repository state or phase status.
+## 2. Roles
 
-## 2. Recommended responsibilities
+### Owner
 
-### Owner: integrator and release gate
+The Owner:
 
-The Owner should:
+- selects the objective and priority;
+- decides interpretation and scope trade-offs;
+- approves or rejects user-visible outputs;
+- controls proprietary data, credentials, and target-machine access;
+- decides disputed review severity;
+- authorises merge; and
+- conducts or delegates milestone closure review.
 
-- choose the task and acceptance criteria;
-- explicitly name the Implementer and independent Reviewer;
-- for Local implementation, normally create and push the named task branch before implementation;
-- for Cloud/sandbox implementation, supply the repository, base branch/ref, authoritative starting
-  commit SHA, and task identity, without requiring a pre-created Owner branch;
-- once a pull request exists, record its actual GitHub head branch and exact head SHA;
-- control access to GitHub, external data, and secrets;
-- run checks that are unavailable to an agent, especially Windows- or proprietary-data checks;
-- review the actual diff and test evidence before merging; and
-- merge only after the locally tested `HEAD` and GitHub PR head both equal the exact SHA approved
-  in the final review.
+The Owner should not need to infer the correct GitHub branch graph. The GitHub Integrator prepares that information.
 
-The Owner should normally avoid editing an agent's in-progress branch. If an urgent Owner edit
-is necessary, stop the agent first, commit the Owner edit, and tell the agent the new commit SHA.
+### ChatGPT
 
-### ChatGPT: eligible Implementer, planner, or Reviewer
+ChatGPT may be Planner, Implementer, Reviewer, or GitHub Integrator according to the tools and environment available. It is normally well suited to:
 
-When ChatGPT has connected GitHub access, it should inspect the actual repository, pull request,
-and diff directly. Pasted diffs, logs, plots, and file excerpts are fallback evidence when direct
-access is unavailable. Depending on the task and available tools, ChatGPT may be the named
-Implementer or Reviewer.
+- reading across roadmap, repository state, prior evidence, and PR history;
+- turning the objective into a bounded task brief;
+- identifying acceptance criteria, assumptions, and likely failure modes;
+- inspecting actual GitHub PR metadata, diffs, and comments;
+- preparing Codex Cloud preflight and postflight instructions;
+- interpreting numerical, visual, and cross-repository results; and
+- maintaining concise current-state and decision records.
 
-When ChatGPT cannot execute the repository, use it primarily to:
+Code authored without executable verification remains an unverified patch, not a completed implementation.
 
-- turn the engineering objective into bounded acceptance criteria;
-- identify affected files, physical assumptions, tests, and runtime checks;
-- prepare copy-and-paste command blocks for the Owner;
-- review a pasted diff, pull-request URL, logs, plots, or failure output; and
-- diagnose failures without proposing broad unrelated rewrites.
+### Codex Cloud
 
-If ChatGPT authors code that it cannot execute, treat the result as an **unverified patch**, not
-as a completed change. The Owner should apply it on a dedicated branch and return exact command
-output before further development or merge.
+Codex Cloud is normally a bounded repository implementation or review worker. Treat it as branch-bound:
 
-### Codex: eligible Implementer or Reviewer with executable verification
+- give it one repository, selected base branch, full starting SHA, task identity, scope, and acceptance criteria;
+- do not expect it to understand the complete cross-repository or PR-stack state from chat history;
+- let it create a result PR when that is the reliable path; and
+- verify the actual GitHub base/head relationship after PR creation.
 
-Use Codex as Implementer when its environment contains the needed repository, dependencies, and
-data; it may instead be the independent Reviewer when ChatGPT implements. In either role, Codex
-should:
+### Codex desktop/local or Owner-machine implementation
 
-- inspect repository instructions and current documentation before editing;
-- verify the supplied starting commit SHA before editing;
-- report missing dependencies or data rather than hiding skips or warnings;
-- inspect the actual diff and executable behaviour rather than relying on a summary; and
-- provide the exact commands, results, assumptions, and limitations.
+Use a persistent local environment when the task needs:
 
-As Implementer, Codex should make the smallest coherent change with tests, run targeted tests,
-the affected runtime entry point, and the full test suite, then commit and open a pull request
-when access permits. As Reviewer, it should not make competing edits; it should independently
-inspect the change and rerun appropriate checks when its environment permits.
+- repeated updates to one branch;
+- proprietary retained controls or telemetry;
+- Windows launcher behaviour;
+- GIS/QGIS/GDAL;
+- long-running optimisation;
+- target-machine performance; or
+- iterative visual review with the Owner.
 
-An inability to import an optional library does not justify changing production behaviour or
-weakening a test. Use the supported non-accelerated path for coverage when appropriate, then
-record the unavailable accelerated check for the Owner to run on the target machine.
+### Independent Reviewer
 
-### External reviewers and clients: evidence review
+The Reviewer inspects the exact proposed result and evidence. Reviewers do not make competing edits unless authorship is explicitly transferred.
 
-Give reviewers a pull-request link or immutable commit SHA, scope statement, assumptions, and
-reproduction commands. Ask them to comment on the pull request rather than sending parallel
-edited copies. Client approval of an output is not a substitute for numerical or runtime
-verification.
+### GitHub Integrator
 
-## 3. Branch protocol
+The Integrator verifies:
 
-### Identity terms
+- starting base and SHA;
+- actual PR base/head branches and head SHA;
+- temporary child-PR relationships;
+- cross-repository merge order; and
+- the exact reviewed head immediately before merge.
 
-The **starting/base SHA** identifies the exact code from which implementation began. It anchors
-the task and its base state; it does not identify the proposed result.
+ChatGPT or the Owner normally fills this role.
 
-The **PR head SHA** identifies the exact result proposed by a pull request. Once the PR exists,
-its actual GitHub head branch and exact head SHA are authoritative for review and merge, even if
-the branch was generated by a cloud service and was not named before implementation.
+## 3. Task packet
 
-### Local implementation
+Every Standard or High-assurance task should begin with a compact packet:
 
-For a Local implementation, the Owner (or one explicitly delegated integrator) normally creates
-and pushes the named task branch before starting the Implementer. The primary Owner command path
-is Windows PowerShell:
+```markdown
+# Task <ID> - <title>
 
-```powershell
-$TaskBranch = (Read-Host "Task branch (for example, task/short-description)").Trim()
-if (-not $TaskBranch) { throw "A task branch is required." }
+Class: E / L / S / H
+Repository:
+Base branch and full starting SHA:
+Owner:
+Implementer:
+Reviewer:
+GitHub Integrator:
+Required capabilities and available environment:
 
-git switch main
-if ($LASTEXITCODE -ne 0) { throw "git switch main failed." }
+## Objective
+One bounded outcome and the downstream reason it is needed now.
 
-git pull --ff-only
-if ($LASTEXITCODE -ne 0) { throw "git pull --ff-only failed." }
+## In scope
+- ...
 
-$WorkingTreeState = git status --porcelain
-if ($LASTEXITCODE -ne 0) { throw "git status failed." }
-if ($WorkingTreeState) { throw "The working tree is not clean." }
+## Out of scope
+- ...
 
-git switch -c $TaskBranch
-if ($LASTEXITCODE -ne 0) { throw "Task branch creation failed." }
+## Done when
+1. Observable success behaviour
+2. Required failure behaviour
+3. Targeted test
+4. Representative runtime path
+5. Full-suite or justified alternative
+6. Owner/target-machine check, if any
 
-$CurrentBranch = (git branch --show-current).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Reading the task branch failed." }
-$StartingSha = (git rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Reading the starting SHA failed." }
+## Required reading
+- AGENTS.md
+- CURRENT_STATE.md
+- one or two task-specific sources
 
-git push -u origin $TaskBranch
-if ($LASTEXITCODE -ne 0) { throw "Task branch push failed." }
+## Preserved behaviour and contracts
+- ...
 
-[pscustomobject]@{
-    Branch = $CurrentBranch
-    StartingSha = $StartingSha
-}
+## Stop or pivot conditions
+- base SHA differs
+- required capability is unavailable
+- task cannot be completed without broadening scope
+- first result invalidates the planned method
+
+## Evidence to return
+- actual PR/base/head/SHA
+- changed-file summary
+- exact commands/results
+- warnings, skips, unavailable checks, limitations
+- any recommendation to revise the next increment
 ```
 
-Do not proceed unless `git status --porcelain` is empty. Send the Local Implementer the repository,
-base branch/ref, named task branch, starting/base SHA, task identity, Implementer, and Reviewer.
-The Implementer verifies both the checked-out branch and starting/base SHA before editing.
+Do not front-load a complete multi-stage design when the first output is expected to change the plan. Define the next decision and one or two increments in detail; keep later work directional.
 
-### Cloud or sandbox implementation
+## 4. Capability preflight
 
-For Cloud/sandbox implementation, the Owner supplies:
+Before implementation, mark each requirement as available, unavailable, or Owner-only:
 
-- the repository and base branch/ref;
-- the authoritative starting/base SHA;
-- the task identity and acceptance criteria; and
-- the explicitly named Implementer and independent Reviewer.
+| Capability | Status |
+| --- | --- |
+| GitHub read | |
+| GitHub branch/PR write | |
+| Repository execution | |
+| Dependency installation | |
+| Windows target environment | |
+| Proprietary Mallala data/retained artefacts | |
+| GIS/QGIS/GDAL | |
+| Long-running optimisation | |
+| Plot/report visual inspection | |
+| Other repository access | |
 
-The supplied starting/base SHA is the authoritative identity for the code from which work begins.
-The service may use an internal sandbox branch and may create the eventual GitHub PR head branch
-itself. Neither generated name needs to equal a pre-created Owner branch. Stop if the starting
-commit differs from the supplied SHA unless the Owner deliberately refreshes the hand-off.
+If a mandatory capability is unavailable, change the task plan before code is written. Prefer a repository-contained synthetic or smoke case, followed by a clearly assigned target-machine gate, rather than pretending unavailable end-to-end evidence exists.
 
-### Once a pull request exists
+## 5. Risk classes and staging
 
-Record the PR number/URL, its actual GitHub head branch, and its exact PR head SHA. These become
-the authoritative identities for review and merge. The Reviewer must state the exact PR head SHA
-reviewed. If the PR head changes for any reason after that review, the new head requires re-review;
-an approval or review statement for an earlier SHA does not carry forward.
+### Class E - experiment/spike
 
-### While work is in progress
+Use when the preferred method is uncertain.
 
-- Do not run a second Implementer on the same task/change set.
-- Do not reuse a branch from a merged, rejected, or superseded pull request.
-- Keep unrelated fixes in separate branches and pull requests.
-- Prefer review comments over direct reviewer commits.
-- If authorship must transfer, the first author commits and pushes, then stops. The next author
-  fetches the actual PR head, verifies the expected SHA, and becomes the sole active author.
-- Never resolve a conflict by accepting an entire side without reviewing the resulting diff and
-  rerunning affected checks.
+Required before work:
 
-### Before merge: exact reviewed-head gate
+- question and hypothesis;
+- baseline/comparison;
+- decision metric;
+- time, sweep, or evaluation budget;
+- production work deliberately excluded; and
+- possible outcomes: `adopt`, `revise`, `discard`, or `defer`.
 
-The final Reviewer must state the exact PR head SHA reviewed. The Owner then checks out the actual
-PR head rather than assuming that a local `task/<short-description>` branch exists. Where GitHub
-CLI is available, use this Windows PowerShell procedure with the full reviewed SHA:
+An experiment does not need production API polish, broad compatibility, or complete documentation. Do not merge it merely to preserve effort. If adopted, start a new production task from current `main` or a named integration branch and carry forward only the justified result.
 
-```powershell
-$PrNumberText = (Read-Host "Pull request number").Trim()
-$PrNumber = 0
-if (-not [int]::TryParse($PrNumberText, [ref]$PrNumber)) {
-    throw "The pull request number must be an integer."
-}
+### Class L - low risk
 
-$ReviewedHeadSha = (Read-Host "Exact full reviewed PR head SHA").Trim()
-if ($ReviewedHeadSha -notmatch '^[0-9a-fA-F]{40}$') {
-    throw "The reviewed head SHA must contain exactly 40 hexadecimal characters."
-}
+Typical work: prose, comments, narrow test maintenance, or non-executable examples.
 
-$WorkingTreeState = git status --porcelain
-if ($LASTEXITCODE -ne 0) { throw "git status failed." }
-if ($WorkingTreeState) { throw "The working tree is not clean." }
+Use one Implementer. Run static checks and any directly affected validation. Independent review may be waived by the Owner.
 
-gh pr checkout $PrNumber
-if ($LASTEXITCODE -ne 0) { throw "gh pr checkout failed." }
+### Class S - standard
 
-$WorkingTreeState = git status --porcelain
-if ($LASTEXITCODE -ne 0) { throw "git status failed after PR checkout." }
-if ($WorkingTreeState) { throw "The checked-out PR working tree is not clean." }
+Typical work: localised bug fix, CLI/loader/exporter change, contained feature, or report/GIS interaction change.
 
-$LocalHeadSha = (git rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Reading the local HEAD failed." }
-$PrJson = gh pr view $PrNumber --json headRefName,headRefOid,baseRefName
-if ($LASTEXITCODE -ne 0) { throw "gh pr view failed." }
-$Pr = $PrJson | ConvertFrom-Json
-$Pr | Select-Object headRefName, headRefOid, baseRefName
+Use one Implementer, a representative runtime path, targeted tests, full regression, and independent review. Use an Owner draft gate when behaviour is user-visible.
 
-if ($LocalHeadSha -ne $ReviewedHeadSha) {
-    throw "Local HEAD does not equal the reviewed head SHA."
-}
-if ($Pr.headRefOid -ne $ReviewedHeadSha) {
-    throw "The GitHub PR head does not equal the reviewed head SHA."
-}
+### Class H - high assurance
 
-git fetch origin $Pr.baseRefName
-if ($LASTEXITCODE -ne 0) { throw "Fetching the PR base branch failed." }
-$BaseComparison = "origin/$($Pr.baseRefName)...HEAD"
-git diff --check $BaseComparison
-if ($LASTEXITCODE -ne 0) { throw "git diff --check failed." }
-git diff --stat $BaseComparison
-if ($LASTEXITCODE -ne 0) { throw "git diff --stat failed." }
+Typical work: physical model, numerical baseline, optimiser semantics, public/versioned schema, provenance, producer/consumer contract, or consequential interpretation change.
 
-python -m pytest
-if ($LASTEXITCODE -ne 0) { throw "The full regression suite failed." }
+Add:
 
-$PostTestWorkingTreeState = git status --porcelain
-if ($LASTEXITCODE -ne 0) { throw "git status failed after testing." }
-if ($PostTestWorkingTreeState) { throw "Testing changed the working tree." }
+- short design review before implementation;
+- explicit preserved baselines/contracts;
+- analytical and failure-mode tests;
+- retained-case or target-machine evidence where applicable;
+- cross-repository compatibility evidence if relevant; and
+- final exact-head independent review.
 
-$PostTestLocalHeadSha = (git rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Reading the post-test local HEAD failed." }
-$PostTestPrJson = gh pr view $PrNumber --json headRefName,headRefOid,baseRefName
-if ($LASTEXITCODE -ne 0) { throw "The post-test gh pr view failed." }
-$PostTestPr = $PostTestPrJson | ConvertFrom-Json
+## 6. Major-task stages
 
-if ($PostTestLocalHeadSha -ne $ReviewedHeadSha) {
-    throw "The tested local HEAD no longer equals the reviewed head SHA."
-}
-if ($PostTestPr.headRefOid -ne $ReviewedHeadSha) {
-    throw "The GitHub PR head changed during testing and requires re-review."
-}
+### Stage 0 - decision brief
 
-[pscustomobject]@{
-    LocalTestedHeadSha = $PostTestLocalHeadSha
-    GitHubPrHeadBranch = $PostTestPr.headRefName
-    GitHubPrHeadSha = $PostTestPr.headRefOid
-    ReviewedHeadSha = $ReviewedHeadSha
-}
+Define the question, downstream decision, risk class, unknowns, evidence needed, non-goals, required environment, and pivot conditions.
+
+### Stage 1 - thin vertical slice
+
+Exercise the real boundary early. Examples:
+
+- installed console command rather than only a handler unit test;
+- one retained artifact rather than only synthetic arrays;
+- one producer bundle read by the real consumer;
+- one corner through the full run-off/GIS path; or
+- one generated report inspected by the Owner.
+
+### Stage 2 - Owner draft gate
+
+For visual, CLI, GIS, report, or authoring work, give the Owner a rough but functional output. Collect one consolidated feedback set and freeze the intended behaviour before extensive polish.
+
+### Stage 3 - production hardening
+
+Generalise only the accepted approach. Add failure handling, necessary tests, stable contracts, and relevant user/method documentation.
+
+### Stage 4 - formal review
+
+Review the frozen increment at an exact head. Avoid repeatedly performing milestone-level review during exploratory iterations.
+
+### Stage 5 - closure review
+
+At a meaningful milestone, record accepted evidence, rejected/deferred approaches, known limitations, document pruning, roadmap impact, and the next one or two increments. Update `CURRENT_STATE.md` once.
+
+## 7. Branch patterns
+
+### Normal task
+
+```text
+main
+└── task branch -> PR to main
 ```
 
-Stop if either `git status --porcelain` is non-empty, either SHA comparison fails, or any required
-gate fails. If GitHub CLI is unavailable, fetch the PR head by its actual GitHub branch or pull
-request ref, check out that commit, and perform the same local-HEAD and remote-PR-head comparisons
-through the available GitHub UI or API.
+Start from current `main`. Record the full starting SHA. One active Implementer owns the branch.
 
-Also run every task-specific command listed in the pull request and independently assess all four
-completion gates in Section 5. For frozen Mallala baseline changes, also run
-`python scripts/r6_phase9_baseline_check.py`.
+### Codex Cloud temporary correction
 
-Merge through GitHub only after required review and checks pass. Then clean up locally:
+Use only when updating the existing parent PR is not reliable:
 
-```powershell
-$LocalPrBranch = (git branch --show-current).Trim()
-if ($LASTEXITCODE -ne 0) { throw "Reading the local PR branch failed." }
-if (-not $LocalPrBranch) { throw "The local PR checkout is detached." }
-if ($LocalPrBranch -in @("main", "master")) {
-    throw "Check out the local PR branch before running cleanup."
-}
-
-git switch main
-if ($LASTEXITCODE -ne 0) { throw "git switch main failed." }
-git pull --ff-only
-if ($LASTEXITCODE -ne 0) { throw "git pull --ff-only failed." }
-git branch -d $LocalPrBranch
-if ($LASTEXITCODE -ne 0) { throw "Deleting the local PR branch failed." }
-git remote prune origin
-if ($LASTEXITCODE -ne 0) { throw "git remote prune origin failed." }
+```text
+main
+└── parent PR branch
+    └── temporary correction PR branch
 ```
 
-Delete the actual GitHub PR head branch after merge unless there is a documented reason to retain
-it. The local branch name created by `gh pr checkout` need not match an Owner-created task branch.
+Preflight packet:
 
-## 4. Standard hand-off packet
+```text
+Repository:
+Parent PR:
+Codex branch to select:
+Expected full starting SHA:
+Child PR must target:
+Purpose: correction only
+Merge order: child -> parent branch -> re-review parent -> main
+```
 
-Every coding prompt should contain:
+Postflight checks:
 
-1. **Repository and base identity:** exact repository, base branch/ref, and starting/base SHA.
-2. **Branch handling:** for Local work, the named pushed task branch; for Cloud/sandbox work, the
-   task identity and permission for the service to create the eventual PR head branch.
-3. **Roles:** the named Implementer and independent Reviewer.
-4. **Objective:** one bounded outcome.
-5. **Out of scope:** nearby work that must not be changed.
-6. **Acceptance criteria:** observable behaviour and failure behaviour.
-7. **Required reading:** `AGENTS.md`, the three repository context documents, and the relevant
-   phase or method document.
-8. **Verification:** exact targeted test, runtime command, full-suite command, and any target-
-   machine-only check.
-9. **Evidence required:** diff summary, assumptions, warnings/skips, exact results, and, once a PR
-   exists, its link, actual GitHub head branch, and exact PR head SHA.
+1. child base equals parent head branch;
+2. child started from the expected parent head;
+3. diff contains only the correction;
+4. no sibling child is active;
+5. child is merged into parent, then deleted; and
+6. parent receives a new exact-head review.
 
-A useful prompt footer is:
+Do not build a chain deeper than a parent and one active child. If several increments are planned, use an integration branch.
 
-> You are the `<Implementer|Reviewer>`; `<name>` holds the other role. Use `<starting-sha>` as the
-> authoritative starting/base identity. For Local work, use `<task-branch>`; for Cloud/sandbox
-> work, the service may create the eventual GitHub PR head branch. Work only on this task; an
-> internal sandbox branch name may differ from the GitHub branch name. Do not merge, rebase, or
-> edit unrelated files. Once a PR exists, report its actual GitHub head branch and exact head SHA.
-> Run the required targeted test, smallest representative runtime command, and
-> `python -m pytest`. Preserve all warnings and skips in the report. Commit the change and open
-> one pull request when the environment permits. Stop and report if the starting SHA differs.
+### Integration branch
 
-### Push/PR fallback
+```text
+main
+└── integration/<milestone> -> final PR to main
+    ├── task A PR
+    ├── task B PR
+    └── task C PR
+```
 
-If an environment cannot push or create a pull request, it must return:
+Merge one reviewed child at a time into the integration branch. Every later child starts from the updated integration head. Use the final PR for milestone-level cumulative review.
 
-- the verified patch or complete diff;
-- the supplied starting SHA;
-- the resulting commit SHA, if the environment created a commit;
-- exact commands and test results, including warnings and skips; and
-- an explicit statement that the Owner must apply and/or push the change and create the PR.
+### Cross-repository task
 
-Never fabricate a PR URL or imply that a local commit is available on GitHub. The Owner should
-verify the starting SHA before applying the patch, rerun the required checks, and then push the
-appropriate branch or update the existing PR head.
+Use separate branches and PRs in each repository. Never treat matching branch names as proof of compatibility. Record both full SHAs and explicit merge order.
 
-## 5. Runtime-error prevention gates
+## 8. Cross-repository contract procedure
 
-Assess all four gates independently and record each as **Pass**, **Fail**, or **N/A** with evidence
-or rationale. A gate may be N/A only when the change cannot affect that category. Never infer N/A
-merely because another gate passed. For example, a documentation-only change may record the
-representative runtime gate as N/A because no executable path changed.
+For `motorcycle-lap-sim` and `motorcycle-runoff`:
 
-1. **Static/change gate:** run `git diff --check` and inspect the complete diff.
-2. **Targeted gate:** run tests specific to the changed feature, including new physical or
-   geometric behaviour where relevant.
-3. **Representative runtime gate:** execute the affected CLI, import, loader, workflow, plotting,
-   or other user-facing path on the smallest representative case.
-4. **Full regression gate:** run `python -m pytest` and report the exact pass/fail/skip result.
+1. Assign one shared task ID.
+2. Identify producer-owned and consumer-owned decisions.
+3. Record producer and consumer starting SHAs.
+4. Decide whether the change is additive/backward-compatible or version-breaking.
+5. Change the canonical producer contract first when producer semantics change.
+6. Update the consumer snapshot with exact source provenance; do not paraphrase a canonical machine-readable contract.
+7. Test old/new compatibility as specified by the task.
+8. Run one end-to-end bundle using exact producer and consumer commits.
+9. Link the paired PRs and state merge order in both descriptions.
+10. Merge independently only when the task brief proves that is safe.
 
-Where the agent environment lacks Numba or another optional dependency, establish whether the
-repository's declared base dependencies installed correctly before diagnosing the code. Do not
-silently install unrecorded packages and then claim the repository is reproducible. Record the
-environment, Python version, install command, missing check, and a command for the Owner's target
-machine. Proprietary data should remain outside Git; use documented hashes/manifests and a
-repository-contained synthetic case whenever possible.
+The simulator owns output facts and contract semantics. The run-off package owns downstream physical assumptions and presentation. Neither repository silently compensates for a defect in the other.
 
-## 6. Access the Owner can safely provide
+## 9. Verification evidence
 
-The most useful additional access is reproducible, least-privilege access rather than broad
-desktop control:
+Record each gate independently:
 
-- grant the coding service access only to the required GitHub repository or organization;
-- provide a repository bootstrap script or documented environment file that installs the same
-  Python version and dependencies as the target machine;
-- make non-secret test fixtures available in the repository or an approved artifact store;
-- configure required secrets in the coding environment's secret store, scoped to the task and
-  never pasted into prompts, commits, logs, or pull requests;
-- provide a Windows CI runner or Owner-run command block for checks that genuinely require
-  Windows, licensed software, hardware, or proprietary data; and
-- use branch protection, pull-request review, and required CI checks so access cannot bypass the
-  integration gate.
+```text
+Static/change: Pass / Fail / N/A - evidence
+Targeted: Pass / Fail / N/A - commands and results
+Representative runtime: Pass / Fail / N/A - real entry point and result
+Full regression: Pass / Fail / N/A - exact pass/fail/skip count
+Owner/target-machine: Pass / Fail / Pending / N/A - evidence and assignee
+```
 
-Do not give an agent the Owner's personal browser session, personal access token, SSH private key,
-or unrestricted machine access merely to avoid a hand-off. Prefer a dedicated account or app
-installation with read/write access to this repository and no permission to merge protected
-branches.
+Rules:
 
-## 7. Recommended default sequence
+- A known runtime error blocks executable work even when tests pass.
+- Help output alone does not prove a successful command path.
+- Do not hide optional-dependency skips.
+- Do not claim proprietary or GIS paths were tested when unavailable.
+- For long optimisation, record policy, controls, grid, boundary margin, backend/workers, limits, termination reason, warnings, and final authoritative evaluation.
+- The Owner's visual acceptance validates usefulness/presentation, not numerical correctness.
 
-For most tasks, use this order:
+## 10. Review protocol
 
-1. Owner defines scope, task identity, acceptance criteria, starting/base SHA, and explicitly names
-   the Implementer and independent Reviewer.
-2. For Local work, Owner normally creates and pushes the named task branch. For Cloud/sandbox
-   work, Owner supplies the repository and base identity and allows the service to create the
-   eventual GitHub PR head branch.
-3. The named Reviewer helps make the plan and acceptance criteria analytically testable.
-4. The named Implementer (ChatGPT or Codex) implements, assesses all four gates, commits, and
-   opens or updates one pull request, or returns the complete fallback evidence if it cannot push.
-5. Once the PR exists, record its actual GitHub head branch and exact head SHA.
-6. The named Reviewer (Codex or ChatGPT) examines the actual repository, PR, diff, and evidence
-   directly when access permits, without editing the branch; pasted material is the fallback. The
-   Reviewer states the exact PR head SHA reviewed.
-7. The Implementer addresses substantive findings on the same change set and reruns checks. Any
-   changed PR head SHA requires re-review.
-8. Owner runs any unavailable target-machine/proprietary-data checks, verifies the locally tested
-   `HEAD` and GitHub PR head both equal the exact reviewed SHA, reviews the final diff, and merges.
-9. Owner deletes the actual PR head branch and starts the next task from updated `main`.
+A review prompt should say:
 
-This sequence allocates roles by actual access rather than product name and leaves the Owner with
-one clear integration decision rather than several competing code copies.
+```markdown
+Review exact PR head <SHA> against <base> and the existing task brief.
+Inspect the actual diff, affected runtime path, tests/evidence, and agreed assumptions.
+Do not expand the increment merely to add desirable future hardening.
+Classify each finding as Blocker, Significant, Follow-up, or Nit.
+State the exact SHA reviewed and return merge/request-changes.
+```
+
+Severity meanings are defined in `AGENTS.md`.
+
+First review: inspect the full change. Later reviews: inspect the delta plus affected regression risk. A head change always invalidates an earlier exact-head approval, but it does not require re-reading unrelated unchanged history.
+
+After two correction cycles, the Owner explicitly chooses merge-with-follow-up, split/rescope, redesign, or abandon.
+
+## 11. Chat and hand-off discipline
+
+Use separate chats for:
+
+- milestone planning;
+- one PR's implementation/review; and
+- milestone closure/retrospective.
+
+Start a new chat after merge, objective change, experiment-to-production transition, more than two review cycles, or when multiple PRs/branches make the current state ambiguous.
+
+Close a chat with a short durable hand-off:
+
+```text
+Objective:
+Repository / PR / exact SHA:
+Decisions made:
+Implemented result:
+Verification completed:
+Known limitations:
+Open Owner decision:
+Next single action:
+Required sources:
+```
+
+Important decisions must also be recorded in the task/PR, `CURRENT_STATE.md`, a method document, or a decision log. Chat memory alone is not project state.
+
+## 12. Pull-request evidence
+
+A PR should include:
+
+- task ID and class;
+- base branch and starting SHA;
+- roles;
+- bounded objective, in-scope and out-of-scope work;
+- important assumptions and preserved behaviour;
+- all verification gates;
+- Owner draft/target-machine status;
+- cross-repository links and merge order, if any;
+- warnings, skips, unavailable checks, and known limitations; and
+- actual GitHub head branch and the final reviewed head SHA in the final review comment.
+
+Do not continually edit a PR body to claim a mutable "current head". GitHub metadata is authoritative. Use the starting SHA in the body and the exact final reviewed head in the review record.
+
+## 13. Merge and cleanup
+
+Immediately before merge, the Owner or Integrator verifies:
+
+- PR base/head identity;
+- GitHub head equals the reviewed SHA;
+- locally tested head equals the reviewed SHA when local checks are required;
+- required evidence is attached;
+- no unresolved Blocker or Significant finding remains; and
+- any Follow-up is clearly non-blocking and recorded only if worth retaining.
+
+After merge, update local `main`, delete the actual PR head branch, prune stale branches, and start the next task from the new `main`.
+
+## 14. Retrospective cadence
+
+After a milestone or several consequential PRs, review:
+
+- review/correction cycles;
+- post-merge fixes;
+- whether the real runtime path was exercised early;
+- abandoned/superseded work;
+- mandatory reading burden;
+- findings later downgraded to optional;
+- documentation duplication; and
+- one process improvement to pilot next.
+
+Metrics are diagnostic, not performance targets.
