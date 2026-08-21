@@ -1,8 +1,8 @@
 # Current repository state
 
-**Status date:** 2026-08-21  
-**Repository:** `rob-graham/motorcycle-lap-sim`  
-**Purpose:** concise operational context for the next task. Update this file after a material milestone, scope decision, contract change, or change of current priority. Do not turn it into a chronological project history.
+- **Status date:** 2026-08-21
+- **Repository:** `rob-graham/motorcycle-lap-sim`
+- **Purpose:** Concise operational context for the next task. Update this file after a material milestone, scope decision, contract change, or change of current priority. Do not turn it into a chronological project history.
 
 ## 1. Implemented and retained state
 
