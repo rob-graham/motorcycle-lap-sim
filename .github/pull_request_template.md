@@ -4,25 +4,26 @@
 - Change class: `E` / `L` / `S` / `H`
 - Base branch:
 - Full starting SHA:
+- Owner:
 - Implementer:
 - Reviewer:
 - GitHub Integrator:
 
 ## Objective and reason now
 
-<!-- One bounded outcome and the downstream reason this increment is needed. -->
+<!-- State one bounded outcome and the downstream reason this increment is needed. -->
 
 ## In scope
 
-- 
+<!-- List the work included in this increment. -->
 
 ## Out of scope
 
-- 
+<!-- List nearby work that must not be changed. -->
 
 ## Preserved behaviour, baselines, and contracts
 
-- 
+<!-- Identify behaviour, baselines, schemas, and contracts that must remain unchanged. -->
 
 ## Required capabilities
 
@@ -38,11 +39,11 @@
 
 Unavailable or Owner-only capabilities:
 
+<!-- Identify unavailable capabilities and the person or environment responsible for each hand-off. -->
+
 ## Acceptance criteria
 
-1. 
-2. 
-3. 
+<!-- Number the observable success, failure, verification, and Owner-gate criteria. -->
 
 ## Verification gates
 
@@ -70,7 +71,7 @@ Evidence or output location:
 
 ## Assumptions, warnings, skips, and known limitations
 
-- 
+<!-- Record material assumptions, warnings, skips, unavailable checks, and limitations. -->
 
 ## Review
 
