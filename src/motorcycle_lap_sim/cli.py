@@ -9,7 +9,8 @@ from motorcycle_lap_sim.motorcycle import load_motorcycle_config
 from motorcycle_lap_sim.optimisation import (
     COARSE_PLANAR_CONTROL_POLICY, FINE_PLANAR_CONTROL_POLICY,
     REFERENCE_PLANAR_CONTROL_POLICY, PlanarOptimisationConfig,
-    optimise_planar_racing_line, write_planar_controls_csv)
+    generate_planar_control_stations, load_planar_controls_csv,
+    optimise_planar_racing_line, planar_control_bounds, write_planar_controls_csv)
 from motorcycle_lap_sim.runoff import retained_export
 from motorcycle_lap_sim.track import Track
 
@@ -79,6 +80,11 @@ def build_parser():
     optimise.add_argument("--output", type=Path, metavar="CONTROLS.csv")
     optimise.add_argument("--policy", choices=tuple(_PLANAR_POLICIES), default="reference")
     advanced_optimise = optimise.add_argument_group("advanced optimisation options")
+    advanced_optimise.add_argument(
+        "--restart-controls", "--initial-controls-csv", dest="initial_controls_csv",
+        type=Path, metavar="CONTROLS.csv",
+        help=("warm-start from a prior controls CSV with the exact same track, policy, "
+              "and boundary-margin layout; search counters and step are not restored"))
     advanced_optimise.add_argument("--initial-step-m", type=_positive_float,
                                    default=_PLANAR_DEFAULTS.initial_step_m)
     advanced_optimise.add_argument("--minimum-step-m", type=_positive_float,
@@ -149,6 +155,10 @@ def _run_optimise(args, parser):
         parser.error(f"track file does not exist: {track_file}")
     if not motorcycle_file.is_file():
         parser.error(f"motorcycle file does not exist: {motorcycle_file}")
+    restart_file = (None if args.initial_controls_csv is None
+                    else args.initial_controls_csv.expanduser().resolve())
+    if restart_file is not None and not restart_file.is_file():
+        parser.error(f"restart controls file does not exist: {restart_file}")
     output = ((Path.cwd() / f"{track_file.stem}_controls.csv").resolve()
               if args.output is None else args.output.expanduser().resolve())
     config = PlanarOptimisationConfig(
@@ -162,14 +172,25 @@ def _run_optimise(args, parser):
         parallel_workers=args.workers, speed_backend=args.speed_backend)
     track = Track.from_yaml(track_file)
     motorcycle = load_motorcycle_config(motorcycle_file)
+    policy = _PLANAR_POLICIES[args.policy]
+    initial_controls = None
+    if restart_file is not None:
+        stations = generate_planar_control_stations(track, policy)
+        lower, upper = planar_control_bounds(track, stations, config.boundary_margin_m)
+        try:
+            initial_controls = load_planar_controls_csv(
+                restart_file, stations, lower, upper)
+        except ValueError as error:
+            parser.error(f"restart controls are incompatible: {error}")
     result = optimise_planar_racing_line(
-        track, motorcycle, _PLANAR_POLICIES[args.policy], config)
+        track, motorcycle, policy, config, initial_controls_m=initial_controls)
     write_planar_controls_csv(output, result)
     print("Deterministic LOCAL optimisation complete; this is not proof of a global fastest line.")
     print(f"Track: {track_file}")
     print(f"Motorcycle: {motorcycle_file}")
     print(f"Controls output: {output}")
     print(f"Control policy: {args.policy}")
+    print(f"Restart controls: {restart_file or 'none (zero-control start)'}")
     print(f"Control count: {len(result.control_s_m)}")
     print(f"Speed backend: {config.speed_backend}; workers: {config.parallel_workers}")
     print(f"Initial lap time: {result.initial_lap_time_s:.9f} s")
