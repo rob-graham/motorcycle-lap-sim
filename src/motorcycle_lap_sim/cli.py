@@ -182,8 +182,10 @@ def _run_optimise(args, parser):
                 restart_file, stations, lower, upper)
         except ValueError as error:
             parser.error(f"restart controls are incompatible: {error}")
-    result = optimise_planar_racing_line(
-        track, motorcycle, policy, config, initial_controls_m=initial_controls)
+        result = optimise_planar_racing_line(
+            track, motorcycle, policy, config, initial_controls_m=initial_controls)
+    else:
+        result = optimise_planar_racing_line(track, motorcycle, policy, config)
     write_planar_controls_csv(output, result)
     print("Deterministic LOCAL optimisation complete; this is not proof of a global fastest line.")
     print(f"Track: {track_file}")
